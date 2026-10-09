@@ -1,0 +1,18 @@
+# Code ownership = research subtopic ownership = thesis contribution map.
+# Replace the placeholder handles with the team's real GitHub usernames.
+
+# Subtopic A: intelligent task decomposition & planning
+/agent/planning/          @Fgq2023
+
+# Subtopic B: state management, memory, provenance & error recovery
+/agent/state/             @Teammate-B-username
+
+# Subtopic C: tool execution & verification
+/agent/tools/             @Teammate-C-username
+/agent/verification/      @Teammate-C-username
+
+# Shared contracts — changes require review by all three owners
+/agent/core/              @Fgq2023 @Teammate-B-username @Teammate-C-username
+
+# Everything else (CLI, output, docs, CI) defaults to the whole team
+*                        @Fgq2023 @Teammate-B-username @Teammate-C-username
