@@ -18,7 +18,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install
         run: pip install -e ".[dev]"
-      - name: Test (fully offline: deterministic mock planner, no API keys)
+      - name: "Test (fully offline: deterministic mock planner, no API keys)"
         run: pytest -v
       - name: Check demo answers and recovery baseline
         run: python scripts/run_baseline.py
