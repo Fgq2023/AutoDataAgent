@@ -183,6 +183,7 @@ class DataContext:
 
     root: str
     profiles: list[DataProfile] = field(default_factory=list)
+    task_contracts: list[dict[str, Any]] = field(default_factory=list)
 
     def tabular_profiles(self) -> list[DataProfile]:
         return [p for p in self.profiles if p.kind in ("csv", "xlsx")]
@@ -193,6 +194,7 @@ class DataContext:
     def to_dict(self) -> dict[str, Any]:
         return {
             "root": self.root,
+            "task_contracts": self.task_contracts,
             "profiles": [asdict(p) for p in self.profiles],
         }
 

@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "customer_totals_year",
+    "artifact": "customer_totals",
+    "source": "../data/orders.db",
+    "year": 2024
+  }
+]

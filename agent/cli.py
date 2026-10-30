@@ -23,7 +23,7 @@ from agent.core.orchestrator import Orchestrator
 from agent.core.types import RunSummary
 from agent.planning.llm_planner import LLMPlanner
 from agent.planning.mock_planner import MockPlanner
-from agent.planning.replanner import Replanner
+from agent.planning.replanner import Replanner, FeedbackReplanner
 from agent.state.manager import StateManager
 from agent.tools import REGISTRY  # noqa: F401  (registers every tool)
 
@@ -56,6 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=float, default=120.0,
         help="sandbox timeout in seconds (default: 120)",
     )
+    parser.add_argument("--max-attempts", type=int, default=3)
+    parser.add_argument("--max-replans", type=int, default=3)
+    parser.add_argument("--task-contracts", help="JSON file of explicit task contracts")
     return parser
 
 
@@ -67,19 +70,23 @@ def main(argv: list[str] | None = None) -> int:
         if not stream.isatty() and hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
 
+    from agent.verification.task import load_contracts
     config = load_config(
         mode=args.mode,
         data_root=args.data_root,
         outputs_root=args.outputs_root,
         inject_failure=args.inject_failure,
         exec_timeout_s=args.timeout,
+        max_attempts=args.max_attempts,
+        max_replans=args.max_replans,
+        task_contracts=load_contracts(args.task_contracts) if args.task_contracts else [],
     )
 
     planner = MockPlanner() if config.mode == "mock" else LLMPlanner()
 
     orchestrator = Orchestrator(
         planner=planner,
-        replanner=Replanner(),
+        replanner=Replanner() if config.mode == "mock" else FeedbackReplanner(planner.client),
         registry=REGISTRY,
         state_factory=StateManager.new_run,
         config=config,

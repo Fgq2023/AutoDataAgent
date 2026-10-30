@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -32,6 +32,14 @@ class AgentConfig:
     inject_failure: str | None = None   # "s3" (transient) | "s3:permanent"
     exec_timeout_s: float = 120.0    # sandbox subprocess timeout
     max_attempts: int = 3            # hard cap on attempts per step
+    max_replans: int = 3             # hard cap for the entire run
+    task_contracts: list[dict] = field(default_factory=list)
+
+    def __post_init__(self):
+        from agent.verification.task import validate_contracts
+        validate_contracts(self.task_contracts)
+        if self.max_attempts < 1 or self.max_replans < 0:
+            raise ValueError("max_attempts must be positive; max_replans must be nonnegative")
 
 
 def load_config(**overrides) -> AgentConfig:

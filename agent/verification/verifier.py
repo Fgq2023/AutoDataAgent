@@ -23,8 +23,9 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 class Verifier:
-    def __init__(self, registry):
+    def __init__(self, registry, task_contracts=None):
         self.registry = registry
+        self.task_contracts = task_contracts or []
 
     def verify(self, step: Step, result: StepResult,
                state: "StateManager") -> Verdict:
@@ -64,6 +65,17 @@ class Verifier:
                     run_rules(tool.semantic_rules, art, inputs, state.run_dir)
                 )
 
+        from agent.verification.task import check_contract
+        for contract in self.task_contracts:
+            if step.output_name == contract["artifact"] and not any(
+                state.artifact(aid).name == contract["artifact"] for aid in result.outputs
+            ):
+                checks.append(CheckResult("task:missing_output", False, "required task artifact was not produced"))
+        for aid in result.outputs:
+            art = state.artifact(aid)
+            for contract in self.task_contracts:
+                if contract["artifact"] == art.name:
+                    checks.append(check_contract(contract, art, state.run_dir))
         return Verdict(all(c.passed for c in checks), checks)
 
     # ------------------------------------------------------------------ #

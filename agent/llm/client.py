@@ -17,6 +17,8 @@ import json
 import os
 import urllib.error
 import urllib.request
+import uuid
+import time
 
 
 class LLMError(Exception):
@@ -33,6 +35,9 @@ class LLMClient:
         )
         self.model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
         self.api_key = os.environ.get("OPENAI_API_KEY", "")
+        # Stable for this client/conversation, as required by OpenCode Go.
+        self.session_id = uuid.uuid4().hex
+        self.last_call = None
 
     # ------------------------------------------------------------------ #
     @property
@@ -66,19 +71,29 @@ class LLMClient:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
+                "User-Agent": "AutoDataAgent/0.1.0",
+                "Accept": "application/json",
+                "x-opencode-session": self.session_id,
             },
             method="POST",
         )
+        started = time.perf_counter()
+        self.last_call = None
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
                 body = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            detail = exc.read().decode("utf-8", errors="replace")
+            detail = detail.replace(self.api_key, "[REDACTED]")[:500]
             raise LLMError(f"LLM HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
             raise LLMError(f"LLM unreachable: {exc.reason}") from exc
 
         try:
+            self.last_call = {"model": body.get("model", self.model),
+                              "usage": body.get("usage"),
+                              "duration_ms": round((time.perf_counter() - started) * 1000),
+                              "finish_reason": body["choices"][0].get("finish_reason")}
             return body["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError(f"unexpected LLM response shape: {body}") from exc

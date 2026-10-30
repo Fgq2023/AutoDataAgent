@@ -36,7 +36,8 @@ _SYSTEM_PROMPT = (
     '"args": {}, "depends_on": [str], "verify": ["schema"] or ["schema", '
     '"semantic"], "output_name": str}]}. '
     "Artifact args (e.g. \"input\") must reference the output_name of steps "
-    "listed in depends_on. Keep plans minimal: usually 3-6 steps."
+    "listed in depends_on. Honor the explicit task_contracts, including their "
+    "required artifact names, filters, grouping and metrics. Keep plans minimal: usually 3-6 steps."
 )
 
 
@@ -89,8 +90,9 @@ class LLMPlanner(BasePlanner):
         user = json.dumps(
             {
                 "goal": goal,
+                "task_contracts": ctx.task_contracts,
                 "data_sources": [
-                    {"name": p.name, "kind": p.kind, "schema": p.schema,
+                    {"name": p.name, "path": p.path, "kind": p.kind, "schema": p.schema,
                      "issues": p.issues}
                     for p in ctx.profiles
                 ],

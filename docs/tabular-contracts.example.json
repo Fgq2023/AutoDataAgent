@@ -1,0 +1,21 @@
+[
+  {
+    "kind": "tabular_aggregate",
+    "artifact": "monthly_orders",
+    "source": "../data/orders.db",
+    "source_type": "sqlite",
+    "table": "orders",
+    "filters": [
+      {"column": "order_date", "op": "gte", "value": "2024-01-01", "type": "text"},
+      {"column": "order_date", "op": "lt", "value": "2025-01-01", "type": "text"}
+    ],
+    "group_by": [
+      {"column": "order_date", "transform": "month", "output": "month"}
+    ],
+    "metrics": [
+      {"op": "sum", "column": "amount", "output": "total"},
+      {"op": "count", "output": "n_orders"}
+    ],
+    "tolerance": "0.005"
+  }
+]
