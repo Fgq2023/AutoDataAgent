@@ -56,7 +56,7 @@ class SqlQueryTool(Tool):
         if not Path(source).is_file():
             raise FileNotFoundError(f"database not found: {source}")
 
-        conn = sqlite3.connect(source)
+        conn = sqlite3.connect(Path(source).resolve().as_uri() + "?mode=ro", uri=True)
         try:
             df = pd.read_sql_query(query, conn)
         finally:

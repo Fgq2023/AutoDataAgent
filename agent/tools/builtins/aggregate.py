@@ -58,6 +58,10 @@ class _BaseAggregate(Tool):
     def _value_columns(self, df: pd.DataFrame, args: dict[str, Any]) -> list[str]:
         requested = list(args.get("value_columns") or [])
         if requested:
+            numeric = set(df.select_dtypes("number").columns)
+            invalid = [c for c in requested if c not in numeric]
+            if invalid:
+                raise ValueError(f"unknown or nonnumeric aggregation columns {invalid}; numeric columns: {sorted(numeric)}")
             return _numeric_value_columns(df, requested)
         # default: every numeric column except unit-price-like columns,
         # whose sums are meaningless

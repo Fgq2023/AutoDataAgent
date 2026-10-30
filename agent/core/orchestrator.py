@@ -81,7 +81,11 @@ class Orchestrator:
                 "— add CSV/XLSX/JSON/SQLite files first"
             )
 
+        ctx.task_contracts = self.config.task_contracts
         graph = self.planner.plan(goal, ctx)
+        for contract in self.config.task_contracts:
+            if not any(s.output_name == contract["artifact"] for s in graph.steps):
+                raise ValueError(f"plan omits required task artifact: {contract['artifact']}")
         state = self.state_factory(self.config.outputs_root, goal, graph)
         state.trace(
             "run_started",
@@ -91,6 +95,7 @@ class Orchestrator:
                 "mode": self.config.mode,
                 "data_root": str(self.config.data_root),
                 "profiles": [p.name for p in ctx.profiles],
+                "task_contracts": self.config.task_contracts,
             },
         )
         state.trace("plan_created", {"steps": graph.to_dict()["steps"]})
@@ -103,9 +108,10 @@ class Orchestrator:
         executor = Executor(self.registry, state, self.config, injector)
         from agent.verification.verifier import Verifier  # local: avoid import cycle
 
-        verifier = Verifier(self.registry)
+        verifier = Verifier(self.registry, self.config.task_contracts)
 
         attempts: dict[str, int] = {}
+        total_attempts: dict[str, int] = {}
         had_failure: set[str] = set()  # steps rescued by retry / replan
         n_retries = 0
         n_replans = 0
@@ -122,6 +128,7 @@ class Orchestrator:
                 while True:
                     attempts[step.step_id] = attempts.get(step.step_id, 0) + 1
                     attempt_no = attempts[step.step_id]
+                    total_attempts[step.step_id] = total_attempts.get(step.step_id, 0) + 1
                     state.trace(
                         "step_attempt",
                         {"step_id": step.step_id, "tool": step.tool, "attempt": attempt_no},
@@ -132,6 +139,7 @@ class Orchestrator:
                     )
 
                     if result.status == StepStatus.SUCCEEDED:
+                        result.attempts = total_attempts[step.step_id]
                         final_status = (
                             StepStatus.SUCCEEDED
                             if attempt_no == 1 and step.step_id not in had_failure
@@ -150,6 +158,18 @@ class Orchestrator:
                     action = state.decide_recovery(
                         step.step_id, result.classification, attempt_no
                     )
+                    feedback = {"step_id": step.step_id, "tool": step.tool,
+                                "classification": result.classification,
+                                "error": result.error,
+                                "attempts": total_attempts[step.step_id],
+                                "verdict": result.verdict.to_dict() if result.verdict else None}
+                    state.trace("failure_feedback", feedback)
+                    if total_attempts[step.step_id] >= self.config.max_attempts:
+                        action = RecoveryAction.FAIL
+                        state.trace("budget_exhausted", {"step_id": step.step_id, "budget": "max_attempts"})
+                    if action == RecoveryAction.REPLAN and n_replans >= self.config.max_replans:
+                        action = RecoveryAction.FAIL
+                        state.trace("budget_exhausted", {"step_id": step.step_id, "budget": "max_replans"})
 
                     if action == RecoveryAction.RETRY:
                         n_retries += 1
@@ -157,8 +177,10 @@ class Orchestrator:
 
                     if action == RecoveryAction.REPLAN:
                         n_replans += 1
-                        new_graph = self.replanner.replan(goal, graph, step, state)
+                        new_graph = self.replanner.replan(goal, graph, step, state, feedback=feedback)
                         if new_graph is not None:
+                            if new_graph is not graph:
+                                raise ValueError("local repair must preserve the existing task graph")
                             attempts[step.step_id] = 0  # fresh start, new tool
                             break  # back to the outer loop (next_ready again)
                         action = RecoveryAction.FAIL  # no alternative existed
@@ -168,7 +190,7 @@ class Orchestrator:
                         step.step_id,
                         StepStatus.FAILED,
                         error=result.error,
-                        attempts=attempt_no,
+                        attempts=total_attempts[step.step_id],
                         duration_ms=result.duration_ms,
                     )
                     graph.mark(step.step_id, StepStatus.FAILED)
@@ -269,6 +291,7 @@ class Orchestrator:
             duration_ms=result.duration_ms,
             attempts=attempt_no,
             classification="verify",
+            verdict=verdict,
         )
 
     # ------------------------------------------------------------------ #
@@ -299,7 +322,7 @@ class Orchestrator:
             run_id=state.run_id,
             status=(
                 "finished"
-                if counts[StepStatus.FAILED] == 0 and counts[StepStatus.SKIPPED] == 0
+                if counts[StepStatus.SUCCEEDED] + counts[StepStatus.RECOVERED] == len(graph.steps)
                 else "finished_with_failures"
             ),
             n_steps=len(graph.steps),
