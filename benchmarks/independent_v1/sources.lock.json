@@ -1,0 +1,32 @@
+{
+  "bike": {
+    "id": 275,
+    "slug": "bike%2Bsharing%2Bdataset",
+    "doi": "10.24432/C5W894",
+    "author": "Hadi Fanaee-T (2013)",
+    "split": "dev",
+    "url": "https://archive.ics.uci.edu/static/public/275/bike%2Bsharing%2Bdataset.zip",
+    "license": "CC-BY-4.0",
+    "sha256": "b70182d0d0508e9abbb79306ce5c0cec34869000f8220175ac83d11dbe845401"
+  },
+  "wine": {
+    "id": 186,
+    "slug": "wine%2Bquality",
+    "doi": "10.24432/C56S3T",
+    "author": "Cortez et al. (2009)",
+    "split": "validation",
+    "url": "https://archive.ics.uci.edu/static/public/186/wine%2Bquality.zip",
+    "license": "CC-BY-4.0",
+    "sha256": "3ed56667f4b828242bd732d7d1dd7f2861e54432239d7fa63877014cbb0304d4"
+  },
+  "energy": {
+    "id": 242,
+    "slug": "energy%2Befficiency",
+    "doi": "10.24432/C51307",
+    "author": "Tsanas and Xifara (2012)",
+    "split": "test",
+    "url": "https://archive.ics.uci.edu/static/public/242/energy%2Befficiency.zip",
+    "license": "CC-BY-4.0",
+    "sha256": "499441eee27929a4b00417f58fd8c63c9cc14b8a71520cd0dd27fcb626738351"
+  }
+}

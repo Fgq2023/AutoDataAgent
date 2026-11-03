@@ -47,6 +47,8 @@ class ReportTool(Tool):
         "Assemble the final markdown analysis report from artifact inputs: "
         "execution summary, provenance chains, result tables and figures."
     )
+    required_args = {"inputs": list}
+    optional_args = {"title": str}
     input_contract = {
         "inputs": "list of artifact names to include in the report",
         "name": "output artifact name (report file is written to the run root)",
@@ -103,6 +105,13 @@ class ReportTool(Tool):
                 lines.append(f"- {line}")
         lines.append("")
 
+        if ctx.rule_citations:
+            lines += ["## 业务规则来源", ""]
+            for citation in ctx.rule_citations:
+                lines += [f"- {citation['rule']} ({citation['source']}:{citation['line']})",
+                          f"  > {citation['quote']}"]
+            lines.append("")
+
         # ---- results ---------------------------------------------------------
         lines += ["## 结果", ""]
         for art in arts:
@@ -118,6 +127,16 @@ class ReportTool(Tool):
             elif art.kind == "text" and Path(run_dir / art.path).is_file():
                 content = (run_dir / art.path).read_text(encoding="utf-8")
                 lines += [f"### {art.name}", "", content, ""]
+
+        lines += ["## 验证与限制", ""]
+        for event in ctx.verification_events:
+            status = "通过" if event["ok"] else "失败"
+            checks = event.get("checks", [])
+            detail = ", ".join(check["name"] for check in checks)
+            if not checks:
+                status = "未覆盖"
+            lines.append(f"- {event['step_id']}（尝试 {event['attempt']}） {status} {detail}")
+        lines += ["", "验证范围以列出的检查为准，未配置独立任务契约时，业务口径仍需结合数据和来源复核。", ""]
 
         # ---- notes -------------------------------------------------------------
         bad = [r for r in summaries if r["status"] in ("failed", "skipped")]

@@ -21,6 +21,8 @@ class PythonExecTool(Tool):
         "receives the input dataframe as `df` and must bind its output "
         "DataFrame to `result`."
     )
+    required_args = {"input": str, "code": str}
+    optional_args = {}
     input_contract = {
         "input": "artifact name of the input dataframe",
         "code": "python code; `df` is the input, bind `result` (DataFrame)",

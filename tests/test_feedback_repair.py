@@ -112,3 +112,32 @@ def test_aggregation_does_not_silently_drop_invalid_requested_column(orchestrato
     errors = [e["payload"] for e in events if e["event"] == "step_attempt_failed"]
     assert any(e["step_id"] == "s3" and "reveneu" in e["error"] for e in errors)
     assert summary.n_failed == 1
+
+
+@pytest.mark.parametrize("valid_repair", [True, False])
+def test_python_failure_is_repaired_or_rejected_before_execution(orchestrator, valid_repair):
+    code = "result = df.assign(month=df['date'].str[:7]).groupby('month',as_index=False)[['units','revenue']].sum()"
+
+    class PythonPlanner(MockPlanner):
+        def plan(self, goal, ctx):
+            graph = super().plan(goal, ctx)
+            step = graph.get("s3")
+            step.tool = "python_exec"
+            step.args = {"input": "sales_clean", "name": "sales_monthly", "code": "result = df[['missing_column']]"}
+            return graph
+
+    class Client:
+        def complete(self, system, user):
+            request = json.loads(user)
+            assert "missing_column" in request["feedback"]["error"]
+            args = request["step"]["args"]
+            args["code"] = code if valid_repair else "result = ("
+            return json.dumps({"args": args})
+
+    orchestrator.planner = PythonPlanner()
+    orchestrator.replanner = FeedbackReplanner(Client())
+    result = orchestrator.run(TREND_GOAL)
+    assert (result.status == "finished") == valid_repair
+    events = json.loads(Path(result.trace_path).read_text(encoding="utf-8"))
+    assert sum(e["event"] == "step_attempt" and e["payload"]["step_id"] == "s1" for e in events) == 1
+    assert any(e["event"] == ("parameter_repair" if valid_repair else "repair_rejected") for e in events)

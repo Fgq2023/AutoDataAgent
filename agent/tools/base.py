@@ -50,6 +50,21 @@ class Tool(ABC):
     #: declared semantic rules: [{"name": ..., "input_arg": ..., "params": {...}}]
     semantic_rules: list[dict[str, Any]] = []
 
+    required_args: dict[str, type] = {}
+    optional_args: dict[str, type] = {}
+
+    def validate_args(self, args: dict[str, Any]) -> None:
+        for key, expected in self.required_args.items():
+            if key not in args:
+                raise ValueError(f"{self.name}: missing argument {key!r}")
+        for key, expected in (self.required_args | self.optional_args).items():
+            if key in args and (not isinstance(args[key], expected)
+                                or expected is str and not args[key].strip()
+                                or expected is list and not all(
+                                    isinstance(value, str) and value.strip() for value in args[key]
+                                )):
+                raise ValueError(f"{self.name}: {key!r} must be a valid {expected.__name__}")
+
     @abstractmethod
     def run(self, args: dict[str, Any], ctx: RunContext) -> list[ArtifactSpec]:
         """Execute the tool.  Artifact args arrive already resolved by the

@@ -14,7 +14,7 @@ from typing import Any
 
 from agent.core.types import DataContext, DataProfile
 
-_SUPPORTED = {".csv": "csv", ".xlsx": "xlsx", ".json": "json", ".db": "sqlite", ".sqlite": "sqlite"}
+_SUPPORTED = {".csv": "csv", ".xlsx": "xlsx", ".json": "json", ".db": "sqlite", ".sqlite": "sqlite", ".md": "text", ".txt": "text"}
 
 
 def _profile_csv_xlsx(path: Path) -> DataProfile:
@@ -127,4 +127,6 @@ def profile_data_sources(data_root: str | Path) -> DataContext:
             profiles.append(_profile_sqlite(path))
         elif kind == "json":
             profiles.append(_profile_json(path))
+        elif kind == "text":
+            profiles.append(DataProfile(path.stem, str(path.resolve()), "text", {}))
     return DataContext(root=str(root.resolve()), profiles=profiles)

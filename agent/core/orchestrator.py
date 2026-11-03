@@ -27,6 +27,8 @@ artifact carries a provenance record (``state.db``).
 from __future__ import annotations
 
 import time
+from pathlib import Path
+from agent.core.task_spec import ClarificationRequired, TaskSpec
 from typing import TYPE_CHECKING, Any, Callable
 
 from agent.core.context import profile_data_sources
@@ -71,9 +73,13 @@ class Orchestrator:
         self.config = config
 
     # ------------------------------------------------------------------ #
-    def run(self, goal: str) -> RunSummary:
+    def run(self, goal: str | TaskSpec, *, cancelled: Callable[[], bool] | None = None) -> RunSummary:
         t0 = time.perf_counter()
 
+        explicit_spec = isinstance(goal, TaskSpec)
+        spec = goal if explicit_spec else TaskSpec(goal)
+        spec.require_answers()
+        goal = spec.goal
         ctx: DataContext = profile_data_sources(self.config.data_root)
         if not ctx.profiles:
             raise ValueError(
@@ -81,11 +87,42 @@ class Orchestrator:
                 "— add CSV/XLSX/JSON/SQLite files first"
             )
 
+        if explicit_spec and not spec.sources:
+            data_profiles = [profile for profile in ctx.profiles if profile.kind != "text"]
+            if len(data_profiles) > 1:
+                names = ", ".join(Path(profile.path).relative_to(ctx.root).as_posix()
+                                  for profile in data_profiles)
+                raise ClarificationRequired({"sources": f"Set sources to the intended files. Available: {names}"})
+        if spec.sources:
+            root = Path(self.config.data_root).resolve()
+            requested = {(root / source).resolve() for source in spec.sources}
+            available = {Path(profile.path) for profile in ctx.profiles}
+            if any(Path(source).is_absolute() for source in spec.sources) or not requested <= available:
+                raise ValueError("TaskSpec sources must identify profiled files relative to data-root")
+            ctx.profiles = [profile for profile in ctx.profiles if Path(profile.path) in requested]
+        citations = spec.rule_citations(self.config.data_root)
+        ctx.task_spec = {**spec.to_dict(), "rule_citations": citations}
         ctx.task_contracts = self.config.task_contracts
         graph = self.planner.plan(goal, ctx)
-        for contract in self.config.task_contracts:
-            if not any(s.output_name == contract["artifact"] for s in graph.steps):
-                raise ValueError(f"plan omits required task artifact: {contract['artifact']}")
+        from agent.verification.task import validate_plan_contracts
+
+        validate_plan_contracts(graph, self.config.task_contracts)
+        for step in graph.steps:
+            if spec.sources and "source" in self.registry[step.tool].input_contract:
+                source = step.args.get("source")
+                if not isinstance(source, str) or Path(source).resolve() not in requested:
+                    raise ValueError(f"step {step.step_id}: source outside TaskSpec")
+        for artifact, columns in spec.output_columns.items():
+            producers = [step for step in graph.steps if step.output_name == artifact]
+            if len(producers) != 1:
+                raise ValueError(f"TaskSpec requires exactly one producer for {artifact!r}")
+            step = producers[0]
+            if step.output_columns and step.output_columns != columns:
+                raise ValueError(f"step {step.step_id}: output_columns conflicts with TaskSpec")
+            if self.registry[step.tool].output_contract.get("kind") not in ("table", "dataframe"):
+                raise ValueError(f"step {step.step_id}: TaskSpec requires a table output")
+            step.output_columns = list(columns)
+        validate_plan_contracts(graph, self.config.task_contracts)
         state = self.state_factory(self.config.outputs_root, goal, graph)
         state.trace(
             "run_started",
@@ -95,6 +132,7 @@ class Orchestrator:
                 "mode": self.config.mode,
                 "data_root": str(self.config.data_root),
                 "profiles": [p.name for p in ctx.profiles],
+                "task_spec": ctx.task_spec,
                 "task_contracts": self.config.task_contracts,
             },
         )
@@ -105,7 +143,7 @@ class Orchestrator:
             if self.config.inject_failure
             else None
         )
-        executor = Executor(self.registry, state, self.config, injector)
+        executor = Executor(self.registry, state, self.config, injector, rule_citations=citations)
         from agent.verification.verifier import Verifier  # local: avoid import cycle
 
         verifier = Verifier(self.registry, self.config.task_contracts)
@@ -115,9 +153,19 @@ class Orchestrator:
         had_failure: set[str] = set()  # steps rescued by retry / replan
         n_retries = 0
         n_replans = 0
+        stop_reason = None
+
+        def check_stop() -> str | None:
+            if cancelled is not None and cancelled():
+                return "cancelled"
+            if time.perf_counter() - t0 >= self.config.run_timeout_s:
+                return "run_timeout"
+            if sum(total_attempts.values()) >= self.config.max_tool_attempts:
+                return "max_tool_attempts"
+            return None
 
         try:
-            while not graph.done():
+            while not graph.done() and stop_reason is None:
                 step: Step | None = graph.next_ready()
                 if step is None:  # defensive: all remaining steps are blocked
                     state.trace("deadlock_detected", {"remaining": graph.ids()})
@@ -126,6 +174,9 @@ class Orchestrator:
                 state.mark(step.step_id, StepStatus.RUNNING)
 
                 while True:
+                    stop_reason = check_stop()
+                    if stop_reason:
+                        break
                     attempts[step.step_id] = attempts.get(step.step_id, 0) + 1
                     attempt_no = attempts[step.step_id]
                     total_attempts[step.step_id] = total_attempts.get(step.step_id, 0) + 1
@@ -171,6 +222,13 @@ class Orchestrator:
                         action = RecoveryAction.FAIL
                         state.trace("budget_exhausted", {"step_id": step.step_id, "budget": "max_replans"})
 
+                    stop_reason = check_stop()
+                    if stop_reason:
+                        state.mark(step.step_id, StepStatus.FAILED, error=result.error,
+                                   attempts=total_attempts[step.step_id])
+                        graph.mark(step.step_id, StepStatus.FAILED)
+                        break
+
                     if action == RecoveryAction.RETRY:
                         n_retries += 1
                         continue  # same step, next attempt
@@ -205,6 +263,14 @@ class Orchestrator:
                     if skipped:
                         state.trace("cascade_skip", {"skipped": skipped})
                     break
+
+            if stop_reason:
+                state.trace("run_stopped", {"reason": stop_reason,
+                                            "tool_attempts": sum(total_attempts.values())})
+                for step in graph.steps:
+                    if graph.status_of(step.step_id) in (StepStatus.PENDING, StepStatus.RUNNING):
+                        state.mark(step.step_id, StepStatus.SKIPPED, error=stop_reason)
+                        graph.mark(step.step_id, StepStatus.SKIPPED)
 
             summary = self._summarize(goal, state, graph, t0, n_retries, n_replans)
             state.trace(

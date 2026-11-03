@@ -60,12 +60,20 @@ class Step:
     verify: list[str] = field(default_factory=lambda: ["schema"])
     output_name: str = ""           # logical artifact name produced
 
+    output_columns: list[str] = field(default_factory=list)
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @staticmethod
     def from_dict(d: dict[str, Any]) -> "Step":
+        columns = d.get("output_columns", [])
+        if not isinstance(columns, list) or any(
+            not isinstance(column, str) or not column.strip() for column in columns
+        ) or len(columns) != len(set(columns)):
+            raise ValueError("output_columns must be a list of unique nonempty strings")
         return Step(
+            output_columns=columns,
             step_id=d["step_id"],
             description=d.get("description", ""),
             tool=d["tool"],
@@ -185,6 +193,8 @@ class DataContext:
     profiles: list[DataProfile] = field(default_factory=list)
     task_contracts: list[dict[str, Any]] = field(default_factory=list)
 
+    task_spec: dict[str, Any] = field(default_factory=dict)
+
     def tabular_profiles(self) -> list[DataProfile]:
         return [p for p in self.profiles if p.kind in ("csv", "xlsx")]
 
@@ -285,6 +295,8 @@ class RunContext:
     lookup: Callable[[str], Artifact]                # artifact name -> Artifact
     step_summaries: Callable[[], list[dict[str, Any]]]
     provenance_lines: Callable[[str], list[str]]    # lineage lines for a name
+    rule_citations: list[dict] = field(default_factory=list)
+    verification_events: list[dict] = field(default_factory=list)
     timeout_s: float = 120.0                         # sandbox wall-clock budget
 
 

@@ -34,7 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Autonomous data agent: decompose a goal, execute tools, "
         "verify results, recover from failures, produce a report.",
     )
-    parser.add_argument("goal", help="the analytical goal in natural language")
+    parser.add_argument("--task-spec", help="JSON specification with confirmed answers")
+    parser.add_argument("goal", nargs="?", help="the analytical goal in natural language")
     parser.add_argument(
         "--mode", choices=["mock", "llm"], default=None,
         help="planner flavour (default: llm if OPENAI_API_KEY is set, else mock)",
@@ -63,7 +64,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if bool(args.goal) == bool(args.task_spec):
+        parser.error("provide either a goal or --task-spec")
 
     # pipes / CI logs: emit UTF-8 so Chinese goals survive any codepage
     for stream in (sys.stdout, sys.stderr):
@@ -93,13 +97,15 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        summary = orchestrator.run(args.goal)
-    except ValueError as exc:
+        from agent.core.task_spec import TaskSpec
+
+        summary = orchestrator.run(TaskSpec.load(args.task_spec) if args.task_spec else args.goal)
+    except (ValueError, OSError) as exc:
         print(f"[error] {exc}", file=sys.stderr)
         return 2
 
     _print_summary(summary)
-    return 0 if summary.n_failed == 0 else 1
+    return 0 if summary.status == "finished" else 1
 
 
 def _print_summary(summary: RunSummary) -> None:

@@ -33,11 +33,15 @@ class AgentConfig:
     exec_timeout_s: float = 120.0    # sandbox subprocess timeout
     max_attempts: int = 3            # hard cap on attempts per step
     max_replans: int = 3             # hard cap for the entire run
+    max_tool_attempts: int = 24
+    run_timeout_s: float = 600.0
     task_contracts: list[dict] = field(default_factory=list)
 
     def __post_init__(self):
         from agent.verification.task import validate_contracts
         validate_contracts(self.task_contracts)
+        if self.max_tool_attempts < 1 or self.run_timeout_s <= 0:
+            raise ValueError("run budgets must be positive")
         if self.max_attempts < 1 or self.max_replans < 0:
             raise ValueError("max_attempts must be positive; max_replans must be nonnegative")
 

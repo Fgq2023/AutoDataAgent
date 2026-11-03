@@ -69,9 +69,9 @@ class FeedbackReplanner(Replanner):
         from agent.tools.base import REGISTRY
 
         tool = REGISTRY[failed_step.tool]
-        if failed_step.tool not in ("chart", "aggregate", "aggregate_pivot", "sql_query"):
+        if failed_step.tool not in ("chart", "aggregate", "aggregate_pivot", "sql_query", "python_exec"):
             state.trace("repair_rejected", {"step_id": failed_step.step_id,
-                        "error": "parameter repair is supported only for chart, aggregation and SQL"})
+                        "error": "parameter repair is supported only for chart, aggregation, SQL and Python"})
             return None
         inputs = []
         for key in tool.artifact_args:
@@ -92,6 +92,8 @@ class FeedbackReplanner(Replanner):
                 'Repair the failed data-analysis tool arguments using the error and actual input schema. '
                 'Return only a JSON object {"args": {...}}. Preserve artifact references, name and all argument keys. '
                 'Do not change the requested analytical meaning. Correct only erroneous parameter values. '
+                'For python_exec, df is already provided; bind a pandas DataFrame to result. '
+                'Do not read other files or external services. '
                 'If the schema does not support a justified repair, return {"args": null}.',
                 json.dumps(request, ensure_ascii=False),
             )
@@ -112,6 +114,11 @@ class FeedbackReplanner(Replanner):
                 if not isinstance(args.get("query"), str):
                     raise ValueError("query must be a string")
                 assert_read_only(args["query"])
+            elif failed_step.tool == "python_exec":
+                if not isinstance(args.get("code"), str) or not args["code"].strip():
+                    raise ValueError("Python repair requires nonempty code")
+                # Syntax validation only: execution isolation is handled by the tool.
+                compile(args["code"], "<repair>", "exec")
             else:
                 group = args.get("group_by")
                 if not isinstance(group, str) or (group != "month" and group not in columns):

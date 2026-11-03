@@ -8,9 +8,10 @@ from agent.tools.builtins import (  # noqa: F401  (import = registration)
     aggregate,
     chart,
     clean_data,
+    join,
     load_data,
     python_exec,
     sql_query,
 )
 
-__all__ = ["aggregate", "chart", "clean_data", "load_data", "python_exec", "sql_query"]
+__all__ = ["aggregate", "chart", "clean_data", "join", "load_data", "python_exec", "sql_query"]

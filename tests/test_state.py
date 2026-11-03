@@ -95,6 +95,22 @@ def test_artifact_ids_are_versioned_on_re_registration(state):
     assert state.store.artifact("raw").valid is False  # but history is auditable
 
 
+def test_retry_does_not_overwrite_previous_artifact_bytes(state):
+    from agent.tools.base import ArtifactSpec
+    import hashlib
+
+    (first,) = _register(state, "s1", "raw")
+    old = (state.run_dir / first.path).read_bytes()
+    state.invalidate_step_artifacts("s1")
+    produced = state.run_dir / "artifacts/raw.csv"
+    produced.write_text("date\n2025-02", encoding="utf-8")
+    (second,) = state.register_artifacts(state.graph.get("s1"), [ArtifactSpec("raw", "dataframe", "artifacts/raw.csv", {"n_rows": 1})], [])
+    assert first.path != second.path
+    assert (state.run_dir / first.path).read_bytes() == old
+    assert (state.run_dir / second.path).read_text(encoding="utf-8") == "date\n2025-02"
+    assert first.meta["sha256"] == hashlib.sha256(old).hexdigest()
+
+
 def test_lookup_raises_on_unknown_name(state):
     with pytest.raises(KeyError):
         state.lookup("never_registered")

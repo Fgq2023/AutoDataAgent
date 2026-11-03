@@ -13,6 +13,7 @@ truth for:
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -141,12 +142,23 @@ class StateManager:
             name = spec.name
             n_prior = len(self.store.artifacts_named(name, valid_only=False))
             artifact_id = name if n_prior == 0 else f"{name}_v{n_prior + 1}"
+            root = self.run_dir.resolve()
+            produced = (root / spec.path).resolve()
+            produced.relative_to(root)  # refuse outputs outside this run
+            content = produced.read_bytes()
+            digest = hashlib.sha256(content).hexdigest()
+            # Reports remain at run-root so their relative artifact links work.
+            snapshot = (root / f"report_{digest}.md" if spec.kind == "text"
+                        else root / "artifacts" / "_versions" / (digest + produced.suffix))
+            snapshot.parent.mkdir(parents=True, exist_ok=True)
+            if not snapshot.exists():
+                snapshot.write_bytes(content)
             art = Artifact(
                 artifact_id=artifact_id,
                 name=name,
                 kind=spec.kind,
-                path=spec.path,
-                meta=spec.meta,
+                path=snapshot.relative_to(root).as_posix(),
+                meta={**spec.meta, "sha256": digest, "producer_path": spec.path},
                 valid=True,
                 created_at=utcnow(),
             )
@@ -167,7 +179,8 @@ class StateManager:
                 "step_id": step.step_id,
                 "tool": step.tool,
                 "artifacts": [
-                    {"artifact_id": a.artifact_id, "kind": a.kind, "path": a.path}
+                    {"artifact_id": a.artifact_id, "kind": a.kind, "path": a.path,
+                     "sha256": a.meta.get("sha256")}
                     for a in arts
                 ],
                 "inputs": input_artifact_ids,
@@ -236,6 +249,7 @@ class StateManager:
                 "name": a.name,
                 "kind": a.kind,
                 "path": a.path,
+                "sha256": a.meta.get("sha256"),
                 "valid": a.valid,
             }
             for a in self.store.all_artifacts(valid_only=False)

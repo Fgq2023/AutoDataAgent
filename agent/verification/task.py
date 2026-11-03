@@ -83,3 +83,23 @@ def check_contract(contract, artifact, run_dir):
         return CheckResult(label, True, prefix + "independent source-record comparison passed")
     except Exception as exc:
         return CheckResult(label, False, prefix + str(exc))
+
+
+def validate_plan_contracts(graph, contracts):
+    for contract in contracts:
+        producers = [step for step in graph.steps if step.output_name == contract["artifact"]]
+        if not producers:
+            raise ValueError(f"plan omits required task artifact: {contract['artifact']}")
+        if len(producers) != 1:
+            raise ValueError(f"plan has multiple producers for task artifact: {contract['artifact']}")
+
+        step = producers[0]
+        if contract["kind"] == "tabular_aggregate":
+            columns = {entry["output"] for entry in contract["group_by"] + contract["metrics"]}
+        else:
+            columns = {"customer", "n_orders", "total_spent"}
+        if step.output_columns and set(step.output_columns) != columns:
+            raise ValueError(
+                f"step {step.step_id}: output_columns conflicts with task contract. "
+                f"Expected {sorted(columns)!r}, got {step.output_columns!r}"
+            )

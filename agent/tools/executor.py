@@ -80,11 +80,13 @@ class FailureInjector:
 
 class Executor:
     def __init__(self, registry, state: "StateManager",
-                 config: "AgentConfig", injector: FailureInjector | None = None):
+                 config: "AgentConfig", injector: FailureInjector | None = None, *,
+                 rule_citations: list[dict] | None = None):
         self.registry = registry
         self.state = state
         self.config = config
         self.injector = injector
+        self.rule_citations = rule_citations or []
 
     # ------------------------------------------------------------------ #
     def execute(self, step: Step, attempt: int) -> StepResult:
@@ -108,6 +110,7 @@ class Executor:
             ) from exc
 
         try:
+            tool.validate_args(step.args)
             resolved, input_ids = self._resolve_args(step, tool)
             ctx = RunContext(
                 run_dir=str(self.state.run_dir.resolve()),
@@ -116,6 +119,11 @@ class Executor:
                 step_summaries=self.state.step_summaries,
                 provenance_lines=self.state.provenance_lines,
                 timeout_s=self.config.exec_timeout_s,
+                rule_citations=self.rule_citations,
+                verification_events=[
+                    event["payload"] for event in self.state.store.all_trace()
+                    if event["event"] == "verification"
+                ] if step.tool == "report" else [],
             )
             specs = tool.run(resolved, ctx)
             artifacts = self.state.register_artifacts(step, specs, input_ids)

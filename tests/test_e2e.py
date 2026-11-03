@@ -47,7 +47,8 @@ def test_trend_report_contains_summary_provenance_and_figure(orchestrator):
     assert "## 执行摘要" in text
     assert "## 数据溯源" in text
     assert "[s1] load_data" in text
-    assert "sales_trend" in text and "artifacts/sales_trend.png" in text
+    figure = next(a for a in summary.artifacts if a["name"] == "sales_trend")
+    assert "sales_trend" in text and figure["path"] in text
     assert "## 结果" in text
 
 
@@ -195,3 +196,60 @@ def test_verify_failure_is_classified_and_recovered(orchestrator, monkeypatch):
     assert verdicts[2]["ok"] is False        # s3 attempt 1: caught the drift
     assert any("drift" in c["detail"] for c in verdicts[2]["checks"])
     assert summary.n_recovered == 1
+
+
+def test_run_tool_budget_stops_before_next_attempt(orchestrator):
+    orchestrator.config.max_tool_attempts = 1
+    summary = orchestrator.run(TREND_GOAL)
+    trace = _trace(summary)
+    assert summary.status == "finished_with_failures"
+    assert sum(e["event"] == "step_attempt" for e in trace) == 1
+    assert any(e["event"] == "run_stopped" and e["payload"]["reason"] == "max_tool_attempts" for e in trace)
+
+
+def test_cancelled_run_does_not_start_tools(orchestrator):
+    summary = orchestrator.run(TREND_GOAL, cancelled=lambda: True)
+    trace = _trace(summary)
+    assert summary.status == "finished_with_failures"
+    assert not any(e["event"] == "step_attempt" for e in trace)
+    assert any(e["event"] == "run_stopped" and e["payload"]["reason"] == "cancelled" for e in trace)
+
+
+def test_output_columns_contract_blocks_report(orchestrator):
+    from agent.planning.mock_planner import MockPlanner
+
+    class WrongColumnsPlanner(MockPlanner):
+        def plan(self, goal, ctx):
+            graph = super().plan(goal, ctx)
+            step = graph.get("s3")
+            step.output_columns = ["month", "total_units", "total_revenue"]
+            step.verify = []
+            return graph
+
+    orchestrator.planner = WrongColumnsPlanner()
+    summary = orchestrator.run(TREND_GOAL)
+    assert summary.status == "finished_with_failures"
+    assert summary.report_path is None
+    assert any(e["event"] == "failure_feedback" and
+               "total_units" in e["payload"]["error"] for e in _trace(summary))
+
+
+def test_plan_columns_cannot_conflict_with_task_contract(orchestrator, data_root):
+    import pytest
+
+    orchestrator.config.task_contracts = [{
+        "kind": "tabular_aggregate", "artifact": "sales_monthly",
+        "source": str(data_root / "sales.csv"), "source_type": "csv",
+        "group_by": [{"column": "date", "transform": "month", "output": "month"}],
+        "metrics": [{"op": "sum", "column": "units", "output": "units"}],
+    }]
+    original_plan = orchestrator.planner.plan
+
+    def conflicting_plan(goal, ctx):
+        graph = original_plan(goal, ctx)
+        graph.get("s3").output_columns = ["month", "wrong"]
+        return graph
+
+    orchestrator.planner.plan = conflicting_plan
+    with pytest.raises(ValueError, match="output_columns conflicts with task contract"):
+        orchestrator.run(TREND_GOAL)

@@ -38,6 +38,8 @@ def _numeric_value_columns(df: pd.DataFrame, value_columns: list[str]) -> list[s
 
 
 class _BaseAggregate(Tool):
+    required_args = {"input": str}
+    optional_args = {"group_by": str, "date_column": str, "value_columns": list}
     input_contract = {
         "input": "artifact name of the dataframe to aggregate",
         "name": "output artifact name",

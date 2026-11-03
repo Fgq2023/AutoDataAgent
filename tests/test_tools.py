@@ -66,7 +66,7 @@ class _FakeArtifact:
 
 def test_clean_data_drops_dirty_rows(ctx):
     art = _FakeArtifact("raw", "artifacts/raw.csv")
-    specs = get_tool("clean_data").run({"input": art, "name": "clean"}, ctx)
+    specs = get_tool("clean_data").run({"input": art, "name": "clean", "drop_negative": True}, ctx)
     import pandas as pd
 
     out = pd.read_csv(ctx.run_dir + "/artifacts/clean.csv")
@@ -193,3 +193,35 @@ def test_python_exec_tool_end_to_end(ctx):
     out = pd.read_csv(ctx.run_dir + "/" + spec.path)
     assert len(out) == 3
     assert spec.meta["sandboxed"] is True
+
+
+def test_clean_preserves_signed_values_and_applies_explicit_date_rule(ctx):
+    from pathlib import Path
+    import pandas as pd
+
+    path = Path(ctx.run_dir) / "artifacts/raw.csv"
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write("bad-date,w,1,2,2\n")
+    spec = get_tool("clean_data").run({
+        "input": _FakeArtifact("raw", "artifacts/raw.csv"),
+        "name": "clean", "date_column": "date", "date_format": "%Y-%m-%d",
+    }, ctx)[0]
+    result = pd.read_csv(Path(ctx.run_dir) / spec.path)
+    assert -8 in result.revenue.values
+    assert "bad-date" not in result.date.values
+    assert spec.meta["dropped_invalid_dates"] == 1
+
+
+@pytest.mark.parametrize("suffix", ["json", "xlsx"])
+def test_load_tabular_formats(ctx, suffix):
+    from pathlib import Path
+    import pandas as pd
+
+    frame = pd.DataFrame({"code": ["a"], "amount": [2]})
+    path = Path(ctx.run_dir) / f"sample.{suffix}"
+    if suffix == "xlsx":
+        frame.to_excel(path, index=False)
+    else:
+        frame.to_json(path, orient="records")
+    spec = get_tool("load_data").run({"source": str(path)}, ctx)[0]
+    pd.testing.assert_frame_equal(pd.read_csv(Path(ctx.run_dir) / spec.path), frame)

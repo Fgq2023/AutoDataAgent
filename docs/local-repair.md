@@ -6,6 +6,7 @@
 LLM 模式的 FeedbackReplanner 将这些反馈与输入产物 Schema、原参数和工具契约交给模型。
 模型只能修改现有参数值，不能改变参数键、工具、产物引用、输出名称或 DAG 依赖。
 首版支持 chart、aggregate 和 aggregate_pivot；后续增加 sql_query（见 task-semantics.md）。
+2026-11-02 增加 python_exec，先检查代码语法，再由工具执行和验证。
 其他工具在调用模型前拒绝修复。
 修复后的列名还必须存在于输入 Schema；未满足条件的建议不执行。
 修复在原图上进行，失败步骤尚未成功，因此其下游尚未执行；只重跑失败步骤即可复用上游结果。
