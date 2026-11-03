@@ -21,7 +21,8 @@ _PNG_MAGIC = b"\x89PNG"
 
 
 def check_artifact(art: "Artifact", run_dir: str | Path,
-                   expected_kind: str | None) -> CheckResult:
+                   expected_kind: str | None,
+                   expected_columns: list[str] | None = None) -> CheckResult:
     """Run all schema checks for one artifact; a single CheckResult."""
     path = Path(run_dir) / art.path
     label = f"schema:{art.artifact_id}"
@@ -34,11 +35,15 @@ def check_artifact(art: "Artifact", run_dir: str | Path,
     if expected_kind and art.kind != expected_kind:
         details.append(f"kind {art.kind!r} != contract {expected_kind!r}")
 
+    if expected_columns and art.kind not in ("dataframe", "table"):
+        details.append("output_columns requires a table")
     if art.kind in ("dataframe", "table"):
         try:
             df = pd.read_csv(path)
         except Exception as exc:  # noqa: BLE001
             return CheckResult(label, False, f"unreadable csv: {exc}")
+        if expected_columns and list(df.columns) != expected_columns:
+            details.append(f"expected output columns {expected_columns!r}, got {list(df.columns)!r}")
         if df.empty:
             details.append("csv has zero rows")
         meta_rows = art.meta.get("n_rows")

@@ -41,7 +41,9 @@ class Verifier:
         checks: list[CheckResult] = []
 
         # ---- layer 1: schema -------------------------------------------------
-        if "schema" in step.verify:
+        if step.output_columns and not result.outputs:
+            checks.append(CheckResult(f"schema:{step.step_id}", False, "expected a table output"))
+        if "schema" in step.verify or step.output_columns:
             expected_kind = tool.output_contract.get("kind")
             for aid in result.outputs:
                 try:
@@ -51,7 +53,7 @@ class Verifier:
                         CheckResult(f"schema:{aid}", False, str(exc))
                     )
                     continue
-                checks.append(check_artifact(art, state.run_dir, expected_kind))
+                checks.append(check_artifact(art, state.run_dir, expected_kind, step.output_columns))
 
         if any(not c.passed for c in checks):
             return Verdict(False, checks)

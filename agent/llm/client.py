@@ -80,7 +80,7 @@ class LLMClient:
         started = time.perf_counter()
         self.last_call = None
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
                 body = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")

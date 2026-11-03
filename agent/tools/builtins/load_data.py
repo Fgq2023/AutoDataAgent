@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,8 @@ class LoadDataTool(Tool):
         "Load a tabular data source (CSV / Excel / JSON file) into the run "
         "as a dataframe artifact that downstream steps can consume."
     )
+    required_args = {"source": str}
+    optional_args = {}
     input_contract = {
         "source": "absolute path of the data file to load",
         "name": "logical artifact name for the loaded data (e.g. sales_raw)",
@@ -31,7 +34,17 @@ class LoadDataTool(Tool):
         name = str(args.get("name") or Path(source).stem)
         suffix = Path(source).suffix.lower()
 
-        df = pd.read_csv(source)
+        if suffix == ".xlsx":
+            df = pd.read_excel(source)
+        elif suffix == ".json":
+            records = json.loads(Path(source).read_text(encoding="utf-8-sig"))
+            if not isinstance(records, list) or not all(isinstance(row, dict) for row in records):
+                raise ValueError("tabular JSON must be an array of row objects")
+            df = pd.DataFrame.from_records(records)
+        elif suffix == ".csv":
+            df = pd.read_csv(source)
+        else:
+            raise ValueError(f"unsupported tabular source format: {suffix}")
         rel = f"artifacts/{name}.csv"
         out = Path(ctx.run_dir) / rel
         out.parent.mkdir(parents=True, exist_ok=True)

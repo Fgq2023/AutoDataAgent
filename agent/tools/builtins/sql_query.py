@@ -37,6 +37,8 @@ class SqlQueryTool(Tool):
         "Execute a read-only SELECT query against a SQLite database file "
         "and store the result as a table artifact."
     )
+    required_args = {"source": str, "query": str}
+    optional_args = {}
     input_contract = {
         "source": "absolute path of the .db file",
         "query": "a single SELECT statement",

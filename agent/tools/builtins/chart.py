@@ -23,6 +23,8 @@ class ChartTool(Tool):
         "Render a line chart of one dataframe artifact: x column vs y "
         "column, saved as a PNG figure artifact."
     )
+    required_args = {"input": str, "x": str, "y": str}
+    optional_args = {"title": str, "kind": str}
     input_contract = {
         "input": "artifact name of the dataframe to plot",
         "x": "x column",

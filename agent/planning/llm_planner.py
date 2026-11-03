@@ -29,14 +29,17 @@ from agent.planning.mock_planner import MockPlanner
 _SYSTEM_PROMPT = (
     "You are a task planner for a data-analysis agent. "
     "Decompose the user's analytical goal into a small task graph. "
+    "Use confirmed TaskSpec answers and treat document quotes as business evidence. "
     "Use ONLY the tools from the provided catalog and ONLY the provided data "
     "sources. Answer with a single JSON object, no prose, no code fences, in "
     "the exact shape: "
     '{"goal": str, "steps": [{"step_id": str, "description": str, "tool": str, '
     '"args": {}, "depends_on": [str], "verify": ["schema"] or ["schema", '
     '"semantic"], "output_name": str}]}. '
+    "When the goal explicitly specifies exact output columns, declare them in order in an optional output_columns array on that table step. "
     "Artifact args (e.g. \"input\") must reference the output_name of steps "
-    "listed in depends_on. Honor the explicit task_contracts, including their "
+    "listed in depends_on. Set args.name to the same value as output_name when the tool accepts name. "
+    "Honor the explicit task_contracts, including their "
     "required artifact names, filters, grouping and metrics. Keep plans minimal: usually 3-6 steps."
 )
 
@@ -90,6 +93,7 @@ class LLMPlanner(BasePlanner):
         user = json.dumps(
             {
                 "goal": goal,
+                "task_spec": ctx.task_spec,
                 "task_contracts": ctx.task_contracts,
                 "data_sources": [
                     {"name": p.name, "path": p.path, "kind": p.kind, "schema": p.schema,
@@ -121,9 +125,12 @@ class LLMPlanner(BasePlanner):
 
         known = set(ids)
         # pass 1: artifact name -> producer step
-        outputs: dict[str, str] = {
-            s.output_name: s.step_id for s in graph.steps if s.output_name
-        }
+        outputs: dict[str, str] = {}
+        for step in graph.steps:
+            if step.output_name:
+                if step.output_name in outputs:
+                    raise ValueError(f"duplicate output name {step.output_name!r}")
+                outputs[step.output_name] = step.step_id
         # pass 2: tools, deps, and artifact references
         for s in graph.steps:
             if s.tool not in REGISTRY:
@@ -134,6 +141,14 @@ class LLMPlanner(BasePlanner):
                         f"step {s.step_id}: unknown dependency {dep!r}"
                     )
             tool = REGISTRY[s.tool]
+            if s.output_columns and tool.output_contract.get("kind") not in ("table", "dataframe"):
+                raise ValueError(f"step {s.step_id}: output_columns requires a table-producing tool")
+            if s.output_name and "name" in tool.input_contract:
+                name = s.args.get("name")
+                if name and name != s.output_name:
+                    raise ValueError(f"step {s.step_id}: args.name must match output_name")
+                s.args["name"] = s.output_name
+            tool.validate_args(s.args)
             for key in tool.artifact_args:
                 if key in s.args:
                     refs = s.args[key]

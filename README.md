@@ -161,6 +161,18 @@ See `docs/generic-task-contracts.md` and `docs/tabular-contracts.example.json`.
 `python scripts/run_generic_semantic_validation.py` verifies a real initial model
 plan followed by controlled semantic faults and real-model repair.
 
+The public-data task suite is documented in `benchmarks/independent_v1/README.md`.
+Run `python scripts/prepare_independent_suite.py` to download attributed UCI data
+and validate 30 reference answers. Live evaluation is explicit and defaults to
+three dev tasks; the test split requires an additional flag. After task setup,
+the project plan is tracked in `docs/objectives-roadmap-2026-11-02.md`.
+
+Python tool parameters can now be repaired from execution/verification feedback,
+with syntax validation and the existing attempt budgets. This does not establish
+a security sandbox. Registered artifacts retain content-hash snapshots across
+retries; the artifact registry's path is authoritative, while tool output paths
+remain compatibility aliases.
+
 ---
 
 ## Architecture — one system, three research subtopics
@@ -253,3 +265,19 @@ are cited in `docs/architecture.md`.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### TaskSpec 与跨源任务
+
+```powershell
+.\.venv\Scripts\python.exe -m examples.demo_cross_source outputs/cross-source-demo
+```
+
+示例生成合成 CSV 和 SQLite，并用固定计划执行读取、查询、多对一连接、聚合和报告。区域 East 的总额为 85，West 为 70。负数退款保留。
+
+`task.json` 中的 `questions` 与 `answers` 使用相同的键。未填写答案时，CLI 会列出待确认问题并退出。填写答案后，可用配置了模型的 CLI 执行同一份规格。
+
+```powershell
+.\.venv\Scripts\python.exe -m agent --mode llm --task-spec outputs/cross-source-demo/task.json --data-root outputs/cross-source-demo
+```
+
+`sources` 是相对于数据根目录的文件路径。 `output_columns` 按产物名称声明实际输出列及其顺序。当前确认流程使用调用方显式列出的关键问题。

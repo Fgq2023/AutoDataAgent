@@ -138,7 +138,9 @@ def check_tabular(c, artifact, run_dir):
                     raise ValueError("duplicate output group")
                 actual[key] = row
         if set(actual) != set(expected):
-            raise ValueError(f"group set mismatch: expected {len(expected)}, actual {len(actual)}")
+            missing = sorted(set(expected) - set(actual))[:3]
+            unexpected = sorted(set(actual) - set(expected))[:3]
+            raise ValueError(f"group set mismatch: expected {len(expected)}, actual {len(actual)}; missing sample={missing}; unexpected sample={unexpected}")
         tolerance = number(c.get("tolerance", "0.005"))
         for key, values in expected.items():
             for metric, target in values.items():
