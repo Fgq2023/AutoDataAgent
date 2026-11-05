@@ -85,7 +85,7 @@ python examples/demo_sql.py        # SQL 问答：2024 年每个客户的总消�
 
 The system runs **fully offline** by default (deterministic mock planner —
 same interface, same pipeline, CI-safe). With an API key the LLM planner
-takes over, with strict validation and graceful fallback to mock on any
+takes over, with strict validation and explicit errors on any
 planning error:
 
 ```bash

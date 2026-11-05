@@ -5,7 +5,7 @@ Examples::
     python -m agent "分析 data/sales.csv 的月度销售趋势，输出月度汇总表和趋势图"
 
     # offline (default without an API key): deterministic mock planner
-    # with OPENAI_API_KEY set: LLM planner (falls back to mock on errors)
+    # with OPENAI_API_KEY set: live planning; errors are reported
 
     # failure-injection demos:
     python -m agent "..." --inject-failure s3            # transient -> RETRY
@@ -18,6 +18,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from agent.llm.client import LLMError
 from agent.core.config import load_config
 from agent.core.orchestrator import Orchestrator
 from agent.core.types import RunSummary
@@ -106,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
                 from agent.llm.client import LLMClient
                 if not LLMClient().is_live:
                     raise ValueError("saved LLM run requires live model credentials to resume")
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, LLMError) as exc:
             print(f"[error] {exc}", file=sys.stderr)
             return 2
 
@@ -125,8 +126,10 @@ def main(argv: list[str] | None = None) -> int:
 
         summary = (orchestrator.resume(args.resume) if args.resume else
                    orchestrator.run(TaskSpec.load(args.task_spec) if args.task_spec else args.goal))
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, LLMError) as exc:
         print(f"[error] {exc}", file=sys.stderr)
+        if getattr(exc, "run_dir", None):
+            print(f"[run] {exc.run_dir}", file=sys.stderr)
         return 2
 
     _print_summary(summary)
