@@ -8,16 +8,13 @@ validates the model's answer strictly:
   * step ids unique, dependencies must exist and be acyclic
   * artifact references must be produced by upstream steps
 
-On any validation error — or when no live LLM is configured — the planner
-degrades gracefully to the deterministic mock planner, so the system
-always produces an executable plan.
+Live planning propagates provider and validation errors. Offline demos select the mock planner explicitly.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import sys
 from typing import Any
 
 from agent.core.context import DataContext
@@ -69,24 +66,11 @@ class LLMPlanner(BasePlanner):
     # ------------------------------------------------------------------ #
     def plan(self, goal: str, ctx: DataContext) -> TaskGraph:
         if not self.client.is_live:
-            print(
-                "[llm-planner] no live LLM configured — "
-                "falling back to the deterministic mock planner",
-                file=sys.stderr,
-            )
-            return self.fallback.plan(goal, ctx)
-
-        try:
-            graph = self._ask(goal, ctx)
-            self._validate(graph)
-            return graph
-        except Exception as exc:  # noqa: BLE001 — degrade, never crash
-            print(
-                f"[llm-planner] planning failed ({exc}) — "
-                "falling back to the deterministic mock planner",
-                file=sys.stderr,
-            )
-            return self.fallback.plan(goal, ctx)
+            from agent.llm.client import LLMError
+            raise LLMError("live planner requires model credentials; select mock mode explicitly")
+        graph = self._ask(goal, ctx)
+        self._validate(graph)
+        return graph
 
     # ------------------------------------------------------------------ #
     def _ask(self, goal: str, ctx: DataContext) -> TaskGraph:

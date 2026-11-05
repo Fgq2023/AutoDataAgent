@@ -78,7 +78,6 @@ class Orchestrator:
     def run(self, goal: str | TaskSpec, *, cancelled: Callable[[], bool] | None = None, _restored=None) -> RunSummary:
         t0 = time.perf_counter()
         client = getattr(self.planner, "client", None) or getattr(self.replanner, "client", None)
-        initial_requests = getattr(client, "request_count", 0)
 
         explicit_spec = isinstance(goal, TaskSpec)
         spec = goal if explicit_spec else TaskSpec(goal)
@@ -107,39 +106,78 @@ class Orchestrator:
         citations = spec.rule_citations(self.config.data_root)
         ctx.task_spec = {**spec.to_dict(), "rule_citations": citations}
         ctx.task_contracts = self.config.task_contracts
-        graph = _restored[0].graph if _restored else self.planner.plan(goal, ctx)
-        from agent.verification.task import validate_plan_contracts
-
-        validate_plan_contracts(graph, self.config.task_contracts)
-        for step in graph.steps:
-            if spec.sources and "source" in self.registry[step.tool].input_contract:
-                source = step.args.get("source")
-                if not isinstance(source, str) or Path(source).resolve() not in requested:
-                    raise ValueError(f"step {step.step_id}: source outside TaskSpec")
-        for artifact, columns in spec.output_columns.items():
-            producers = [step for step in graph.steps if step.output_name == artifact]
-            if len(producers) != 1:
-                raise ValueError(f"TaskSpec requires exactly one producer for {artifact!r}")
-            step = producers[0]
-            if step.output_columns and step.output_columns != columns:
-                raise ValueError(f"step {step.step_id}: output_columns conflicts with TaskSpec")
-            if self.registry[step.tool].output_contract.get("kind") not in ("table", "dataframe"):
-                raise ValueError(f"step {step.step_id}: TaskSpec requires a table output")
-            step.output_columns = list(columns)
-        validate_plan_contracts(graph, self.config.task_contracts)
-        state = _restored[0] if _restored else self.state_factory(self.config.outputs_root, goal, graph)
+        state = _restored[0] if _restored else self.state_factory(
+            self.config.outputs_root, goal, TaskGraph(goal, []))
         manifest = _restored[1] if _restored else {
-            "version": 1, "spec": spec.to_dict(), "explicit_spec": explicit_spec,
-            "config": asdict(self.config), "plan": graph.to_dict(),
+            "version": 1, "phase": "planning", "spec": spec.to_dict(), "explicit_spec": explicit_spec,
+            "config": asdict(self.config), "plan": state.graph.to_dict(),
             "inputs": {profile.path: journal.digest(profile.path) for profile in ctx.profiles},
-            "elapsed": 0.0, "active_since": None,
-            "model_requests": getattr(client, "request_count", 0) - initial_requests,
+            "elapsed": 0.0, "active_since": time.time(), "model_requests": 0,
             "model_identity": {key: getattr(client, key) for key in
                                ("provider", "base_url", "model", "session_id")
                                if hasattr(client, key)},
         }
         if not _restored:
             journal.initialize(state, manifest)
+        planning_hook = getattr(client, "before_request", None)
+        planning_events = getattr(client, "on_event", None)
+
+        def reserve_planning_request():
+            remaining = self.config.run_timeout_s - (time.perf_counter() - t0)
+            if remaining <= 0 or manifest["model_requests"] >= 8:
+                raise ValueError("planning budget exhausted")
+            manifest["model_requests"] += 1
+            manifest["elapsed"] = time.perf_counter() - t0
+            manifest["active_since"] = time.time()
+            journal.save(state, manifest)
+            return min(60, remaining)
+
+        if client is not None and not _restored:
+            client.before_request = reserve_planning_request
+            client.on_event = state.trace
+        try:
+            graph = _restored[0].graph if _restored else self.planner.plan(goal, ctx)
+            from agent.verification.task import validate_plan_contracts
+
+            validate_plan_contracts(graph, self.config.task_contracts)
+            for step in graph.steps:
+                if spec.sources and "source" in self.registry[step.tool].input_contract:
+                    source = step.args.get("source")
+                    if not isinstance(source, str) or Path(source).resolve() not in requested:
+                        raise ValueError(f"step {step.step_id}: source outside TaskSpec")
+            for artifact, columns in spec.output_columns.items():
+                producers = [step for step in graph.steps if step.output_name == artifact]
+                if len(producers) != 1:
+                    raise ValueError(f"TaskSpec requires exactly one producer for {artifact!r}")
+                step = producers[0]
+                if step.output_columns and step.output_columns != columns:
+                    raise ValueError(f"step {step.step_id}: output_columns conflicts with TaskSpec")
+                if self.registry[step.tool].output_contract.get("kind") not in ("table", "dataframe"):
+                    raise ValueError(f"step {step.step_id}: TaskSpec requires a table output")
+                step.output_columns = list(columns)
+            validate_plan_contracts(graph, self.config.task_contracts)
+            if not _restored:
+                state.graph = graph
+                state.store.insert_steps(graph.steps)
+                manifest["plan"] = graph.to_dict()
+                manifest["phase"] = "execution"
+                journal.save(state, manifest)
+        except BaseException as exc:
+            if not _restored:
+                manifest["phase"] = "planning_failed"
+                manifest["elapsed"] = time.perf_counter() - t0
+                manifest["active_since"] = None
+                journal.save(state, manifest)
+                exc.run_dir = str(state.run_dir)
+                state.trace("run_stopped", {"phase": "planning",
+                            "reason": getattr(exc, "reason", "planning_error")})
+                state.export_trace()
+                state.close()
+            raise
+        finally:
+            if client is not None and not _restored:
+                client.before_request = planning_hook
+                client.on_event = planning_events
         from agent.state.lock import run_lock
         guard = None
         if not _restored:
@@ -178,7 +216,7 @@ class Orchestrator:
         had_failure: set[str] = set()  # steps rescued by retry / replan
         n_retries = sum(event["event"] == "retry_started" for event in state.store.all_trace())
         n_replans = sum(event["event"] == "replan_started" for event in state.store.all_trace())
-        elapsed_before = manifest["elapsed"]
+        elapsed_before = manifest["elapsed"] if _restored else 0.0
         manifest["active_since"] = time.time()
         journal.save(state, manifest)
 
@@ -191,6 +229,7 @@ class Orchestrator:
 
         clients = {c for c in (client, getattr(self.replanner, "client", None)) if c is not None}
         old_hooks = {c: getattr(c, "before_request", None) for c in clients}
+        old_events = {c: getattr(c, "on_event", None) for c in clients}
 
         def before_request():
             if elapsed_before + time.perf_counter() - t0 >= self.config.run_timeout_s:
@@ -204,6 +243,7 @@ class Orchestrator:
 
         for model_client in clients:
             model_client.before_request = before_request
+            model_client.on_event = state.trace
 
         def check_stop() -> str | None:
             if cancelled is not None and cancelled():
@@ -347,9 +387,16 @@ class Orchestrator:
             )
             state.export_trace()
             return summary
+        except Exception as exc:
+            from agent.llm.client import LLMProviderStop
+            if isinstance(exc, LLMProviderStop):
+                exc.run_dir = str(state.run_dir)
+                state.trace("run_stopped", {"phase": "execution", "reason": exc.reason, "status": exc.status})
+            raise
         finally:
             for model_client, hook in old_hooks.items():
                 model_client.before_request = hook
+                model_client.on_event = old_events[model_client]
             persist()
             manifest["active_since"] = None
             journal.save(state, manifest)
@@ -377,6 +424,8 @@ class Orchestrator:
             manifest = journal.load(store)
             if manifest.get("version") != 1:
                 raise ValueError("unsupported resume version")
+            if manifest.get("phase", "execution") != "execution":
+                raise ValueError("initial planning incomplete; inspect trace and start a new run")
             for path, expected in manifest["inputs"].items():
                 if not Path(path).is_file() or journal.digest(path) != expected:
                     raise ValueError(f"input changed: {path}")

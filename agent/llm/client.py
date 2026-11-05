@@ -6,9 +6,7 @@ Two providers:
     supported for gateways / regional deployments)
   * ``mock``   — no network, deterministic; the system runs fully offline
 
-The planner degrades gracefully: without ``OPENAI_API_KEY`` the LLM
-planner falls back to the deterministic mock planner (see
-:mod:`agent.planning.llm_planner`).
+Live planning requires model credentials. Offline demos explicitly select mock mode.
 """
 
 from __future__ import annotations
@@ -23,6 +21,15 @@ import time
 
 class LLMError(Exception):
     """Raised when the provider call fails."""
+
+
+class LLMProviderStop(LLMError):
+    """Authentication, quota or rate-limit failure requiring a run stop."""
+
+    def __init__(self, status, message):
+        self.status = status
+        self.reason = "model_authentication" if status in (401, 403) else "model_quota_or_rate_limit"
+        super().__init__(message)
 
 
 class LLMClient:
@@ -40,12 +47,17 @@ class LLMClient:
         self.last_call = None
         self.request_count = 0
         self.before_request = None
+        self.on_event = None
 
     # ------------------------------------------------------------------ #
     @property
     def is_live(self) -> bool:
         """True when a real provider is configured."""
         return self.provider == "openai" and bool(self.api_key)
+
+    def emit(self, event, **payload):
+        if self.on_event:
+            self.on_event(event, payload)
 
     def reserve_request(self):
         timeout = self.before_request() if self.before_request else None
@@ -89,19 +101,33 @@ class LLMClient:
         for attempt in range(2):
             request_timeout = self.reserve_request() or 60
             attempt_started = time.perf_counter()
+            self.emit("model_request_started", request=self.request_count, attempt=attempt + 1, model=self.model)
             try:
                 with urllib.request.urlopen(req, timeout=min(60, request_timeout)) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
+                self.emit("model_request_succeeded", request=self.request_count, usage=body.get("usage"),
+                          duration_ms=round((time.perf_counter() - attempt_started) * 1000))
                 break
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
                 detail = detail.replace(self.api_key, "[REDACTED]")[:500]
+                self.emit("model_request_failed", request=self.request_count, status=exc.code,
+                          reason="http_error", detail=detail)
+                error = LLMProviderStop if exc.code in (401, 402, 403, 429) else None
+                if error:
+                    raise error(exc.code, f"LLM HTTP {exc.code}: {detail}") from exc
                 raise LLMError(f"LLM HTTP {exc.code}: {detail}") from exc
             except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+                detail = str(exc).replace(self.api_key, "[REDACTED]")
+                self.emit("model_request_failed", request=self.request_count, reason="transport_error",
+                          detail=detail)
                 if attempt == 0:
-                    time.sleep(min(1, max(0, request_timeout - (time.perf_counter() - attempt_started))))
+                    delay = min(1, max(0, request_timeout - (time.perf_counter() - attempt_started)))
+                    self.emit("model_transport_retry", request=self.request_count, delay_s=delay,
+                              next_attempt=2, reason=detail)
+                    time.sleep(delay)
                     continue
-                raise LLMError(f"LLM unreachable: {exc}") from exc
+                raise LLMError(f"LLM unreachable: {detail}") from exc
 
         try:
             self.last_call = {"model": body.get("model", self.model),

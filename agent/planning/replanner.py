@@ -134,6 +134,9 @@ class FeedbackReplanner(Replanner):
                         "before": before, "after": args, "feedback": feedback})
             return graph
         except Exception as exc:
+            from agent.llm.client import LLMProviderStop
+            if isinstance(exc, LLMProviderStop):
+                raise
             error = str(exc)
             secret = getattr(self.client, "api_key", "")
             if secret:
