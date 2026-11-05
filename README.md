@@ -289,3 +289,15 @@ MIT — see [LICENSE](LICENSE).
 Docker 后端先构建 docker/Dockerfile.sandbox 为 autodataagent-sandbox:local，再通过 --sandbox-backend docker 选择。scripts/verify_m3.py 可显式执行真实 Docker 验收。独立任务评测默认要求 Docker。
 
 详细复现命令、实测证据与适用范围见 docs/m3-status-2026-11-05.md。
+
+
+### 本地 Web 工作台（M4）
+
+安装可选依赖后运行：
+
+    python -m pip install -e ".[web]"
+    python -m agent.web --data-root data --outputs-root outputs/web --port 8000
+
+打开 http://127.0.0.1:8000 。页面支持目标与数据选择、关键口径确认、启动/取消/恢复、步骤和验证轨迹、表格/图表/报告预览，以及完整证据 ZIP 导出。CLI 与 Web 共用 execute_run 构造与执行入口。
+
+运行 python scripts/rehearse_m4.py 可完成两轮正常、错误恢复和真实服务进程中断恢复演练。详细使用说明见 docs/m4-local-web.md，期中候选技术报告见 docs/midterm-report-2026-11-05.md。

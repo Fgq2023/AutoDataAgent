@@ -123,6 +123,8 @@ class Orchestrator:
         planning_events = getattr(client, "on_event", None)
 
         def reserve_planning_request():
+            if cancelled is not None and cancelled():
+                raise ValueError("planning cancelled")
             remaining = self.config.run_timeout_s - (time.perf_counter() - t0)
             if remaining <= 0 or manifest["model_requests"] >= 8:
                 raise ValueError("planning budget exhausted")
@@ -170,7 +172,7 @@ class Orchestrator:
                 journal.save(state, manifest)
                 exc.run_dir = str(state.run_dir)
                 state.trace("run_stopped", {"phase": "planning",
-                            "reason": getattr(exc, "reason", "planning_error")})
+                            "reason": "cancelled" if cancelled is not None and cancelled() else getattr(exc, "reason", "planning_error")})
                 state.export_trace()
                 state.close()
             raise
@@ -232,6 +234,8 @@ class Orchestrator:
         old_events = {c: getattr(c, "on_event", None) for c in clients}
 
         def before_request():
+            if cancelled is not None and cancelled():
+                raise ValueError("run cancelled")
             if elapsed_before + time.perf_counter() - t0 >= self.config.run_timeout_s:
                 raise ValueError("run time budget exhausted")
             if manifest["model_requests"] >= 8:
