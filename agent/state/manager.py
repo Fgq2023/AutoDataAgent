@@ -35,6 +35,13 @@ if TYPE_CHECKING:  # pragma: no cover
     from agent.tools.base import ArtifactSpec
 
 
+def atomic(method):
+    def wrapped(self, *args, **kwargs):
+        with self.store.transaction():
+            return method(self, *args, **kwargs)
+    return wrapped
+
+
 class StateManager:
     def __init__(self, run_dir: str | Path, store: RunStore, run_id: str,
                  goal: str, graph: TaskGraph):
@@ -91,6 +98,7 @@ class StateManager:
         self.store.update_step(step_id, status, attempts=attempts,
                                error=error, duration_ms=duration_ms)
 
+    @atomic
     def checkpoint(self, step: Step, result, verdict: Verdict,
                    final_status: StepStatus) -> None:
         """Finalise a successful step attempt: status + verdict into the store."""
@@ -130,6 +138,7 @@ class StateManager:
     # ------------------------------------------------------------------ #
     # Artifacts & provenance
     # ------------------------------------------------------------------ #
+    @atomic
     def register_artifacts(self, step: Step, specs: "list[ArtifactSpec]",
                            input_artifact_ids: list[str]) -> list[Artifact]:
         """Persist freshly produced artifacts + provenance records.

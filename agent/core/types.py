@@ -295,6 +295,8 @@ class RunContext:
     lookup: Callable[[str], Artifact]                # artifact name -> Artifact
     step_summaries: Callable[[], list[dict[str, Any]]]
     provenance_lines: Callable[[str], list[str]]    # lineage lines for a name
+    sandbox_backend: str = "subprocess"
+    sandbox_image: str = "autodataagent-sandbox:local"
     rule_citations: list[dict] = field(default_factory=list)
     verification_events: list[dict] = field(default_factory=list)
     timeout_s: float = 120.0                         # sandbox wall-clock budget

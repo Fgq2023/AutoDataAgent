@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import sys
+import subprocess
 import tempfile
 import uuid
 from urllib.error import HTTPError, URLError
@@ -46,12 +47,17 @@ class CountedClient(LLMClient):
         self.total = 0
         self.provider_stop = None
 
-    def complete(self, *args, **kwargs):
+    def reserve_request(self):
         if self.total >= self.batch_limit or len(self.calls) >= 8:
             raise RequestBudgetExceeded("model request budget exhausted")
         if self.provider_stop:
             raise RuntimeError(self.provider_stop)
+        timeout = super().reserve_request()
         self.total += 1
+        self.calls.append(None)
+        return timeout
+
+    def complete(self, *args, **kwargs):
         try:
             return super().complete(*args, **kwargs)
         except Exception as exc:
@@ -60,11 +66,14 @@ class CountedClient(LLMClient):
                 self.provider_stop = "model_authentication" if cause.code in (401, 403) else "model_quota_or_rate_limit"
             raise
         finally:
-            self.calls.append(self.last_call)
+            if self.calls:
+                self.calls[-1] = self.last_call
 
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--sandbox-backend", choices=["docker", "subprocess"], default="docker",
+                        help="docker for formal evaluation; subprocess for trusted development only")
     parser.add_argument("--split", choices=["dev", "validation", "test"], default="dev")
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--offset", type=int, default=0, help="zero-based attempt index")
@@ -80,6 +89,12 @@ def main():
     client = CountedClient(args.batch_requests)
     if not client.is_live:
         parser.error("configure OPENAI_* process environment; this script makes real model calls")
+    if args.sandbox_backend == "docker":
+        try:
+            subprocess.run(["docker", "image", "inspect", "autodataagent-sandbox:local"],
+                           check=True, capture_output=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as exc:
+            parser.error(f"Docker sandbox unavailable: {exc}")
     base = ROOT / "outputs/independent_v1"
     tasks = [json.loads(line) for line in (base / "tasks.jsonl").read_text(encoding="utf-8").splitlines()]
     tasks = [t for t in tasks if t["split"] == args.split][:args.limit]
@@ -102,7 +117,7 @@ def main():
         client.calls = []
         client.session_id = uuid.uuid4().hex
         contracts = json.loads((base / "grader_only" / (task["task_id"] + ".contract.json")).read_text(encoding="utf-8"))
-        config = AgentConfig(data_root=str(base / task["data_root"]), outputs_root=str(output / f"{task['task_id']}_r{repeat}"), mode="llm", task_contracts=contracts if args.provide_contracts else [])
+        config = AgentConfig(data_root=str(base / task["data_root"]), outputs_root=str(output / f"{task['task_id']}_r{repeat}"), mode="llm", sandbox_backend=args.sandbox_backend, task_contracts=contracts if args.provide_contracts else [])
         item = {"task_id": task["task_id"], "repeat": repeat, "attempt_index": index, "answer_correct": False}
         try:
             summary = Orchestrator(StrictPlanner(client), FeedbackReplanner(client), REGISTRY, StateManager.new_run, config).run(task["question"])
@@ -142,6 +157,7 @@ def main():
             payload["stop_reason"] = "batch_request_limit"
         payload["batch_request_limit"] = client.batch_limit
         payload["batch_requests_used"] = client.total
+        payload["sandbox_backend"] = args.sandbox_backend
         payload["source_sha256"] = code_hashes
         payload["metrics"] = {"tasks": len(results), "correct": sum(r["answer_correct"] for r in results),
                               "wrong_accepts": sum(r.get("summary", {}).get("status") == "finished" and not r["answer_correct"] for r in results),

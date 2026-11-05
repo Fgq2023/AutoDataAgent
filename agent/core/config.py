@@ -35,9 +35,13 @@ class AgentConfig:
     max_replans: int = 3             # hard cap for the entire run
     max_tool_attempts: int = 24
     run_timeout_s: float = 600.0
+    sandbox_backend: str = "subprocess"
+    sandbox_image: str = "autodataagent-sandbox:local"
     task_contracts: list[dict] = field(default_factory=list)
 
     def __post_init__(self):
+        if self.sandbox_backend not in ("subprocess", "docker"):
+            raise ValueError("unsupported sandbox backend")
         from agent.verification.task import validate_contracts
         validate_contracts(self.task_contracts)
         if self.max_tool_attempts < 1 or self.run_timeout_s <= 0:

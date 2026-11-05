@@ -13,6 +13,7 @@ Every run gets its own ``state.db`` inside the run directory, holding:
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,7 +75,23 @@ class RunStore:
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
-        self.conn.commit()
+        self._commit()
+
+    def _commit(self):
+        if not getattr(self, "_in_transaction", False):
+            self.conn.commit()
+
+    @contextmanager
+    def transaction(self):
+        if getattr(self, "_in_transaction", False):
+            yield
+            return
+        self._in_transaction = True
+        try:
+            with self.conn:
+                yield
+        finally:
+            self._in_transaction = False
 
     # -- run ----------------------------------------------------------------
     def insert_run(self, run_id: str, goal: str) -> None:
@@ -82,7 +99,7 @@ class RunStore:
             "INSERT INTO runs(run_id, goal, started_at) VALUES (?,?,?)",
             (run_id, goal, utcnow()),
         )
-        self.conn.commit()
+        self._commit()
 
     # -- steps ---------------------------------------------------------------
     def insert_steps(self, steps: list[Step]) -> None:
@@ -90,7 +107,7 @@ class RunStore:
             "INSERT INTO steps(step_id, description, tool) VALUES (?,?,?)",
             [(s.step_id, s.description, s.tool) for s in steps],
         )
-        self.conn.commit()
+        self._commit()
 
     def update_step(
         self,
@@ -117,7 +134,7 @@ class RunStore:
                 step_id,
             ),
         )
-        self.conn.commit()
+        self._commit()
 
     def step_rows(self) -> list[dict[str, Any]]:
         return [dict(r) for r in self.conn.execute(
@@ -140,13 +157,13 @@ class RunStore:
                 art.created_at or utcnow(),
             ),
         )
-        self.conn.commit()
+        self._commit()
 
     def invalidate_artifact(self, artifact_id: str) -> None:
         self.conn.execute(
             "UPDATE artifacts SET valid=0 WHERE artifact_id=?", (artifact_id,)
         )
-        self.conn.commit()
+        self._commit()
 
     def artifact(self, artifact_id: str) -> Artifact | None:
         row = self.conn.execute(
@@ -203,7 +220,7 @@ class RunStore:
                 rec.created_at or utcnow(),
             ),
         )
-        self.conn.commit()
+        self._commit()
 
     def provenance(self, artifact_id: str) -> ProvenanceRecord | None:
         row = self.conn.execute(
@@ -237,7 +254,7 @@ class RunStore:
             "INSERT INTO trace(ts, event, payload) VALUES (?,?,?)",
             (utcnow(), event, json.dumps(payload or {}, ensure_ascii=False, default=str)),
         )
-        self.conn.commit()
+        self._commit()
         return cur.lastrowid  # type: ignore[return-value]
 
     def all_trace(self) -> list[dict[str, Any]]:

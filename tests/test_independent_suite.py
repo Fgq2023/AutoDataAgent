@@ -38,15 +38,20 @@ def test_independent_sql_reference_matches_hand_calculated_answer(tmp_path):
 
 def test_batch_budget_counts_failed_requests(monkeypatch):
     import pytest
-    from scripts.run_independent_suite import CountedClient, LLMClient, RequestBudgetExceeded
+    from urllib.error import URLError
+    from scripts.run_independent_suite import CountedClient, RequestBudgetExceeded
 
-    def fail(self, *args):
-        raise TimeoutError("provider timeout")
+    def fail(*args, **kwargs):
+        raise URLError("provider timeout")
 
-    monkeypatch.setattr(LLMClient, "complete", fail)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", fail)
+    monkeypatch.setattr("time.sleep", lambda delay: None)
     client = CountedClient(1)
-    with pytest.raises(TimeoutError):
+    with pytest.raises(RequestBudgetExceeded):
         client.complete("system", "user")
+    assert client.total == client.request_count == 1
+    assert len(client.calls) == 1
     client.calls.clear()
     with pytest.raises(RequestBudgetExceeded):
         client.complete("system", "next")

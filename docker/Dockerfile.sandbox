@@ -1,0 +1,4 @@
+FROM python:3.12-slim
+RUN pip install --no-cache-dir pandas==2.2.3
+ENV OPENAI_API_KEY="" OPENCODE_API_KEY=""
+WORKDIR /tmp
