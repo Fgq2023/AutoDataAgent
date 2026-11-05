@@ -20,13 +20,7 @@ from pathlib import Path
 
 from agent.llm.client import LLMError
 from agent.core.config import load_config
-from agent.core.orchestrator import Orchestrator
 from agent.core.types import RunSummary
-from agent.planning.llm_planner import LLMPlanner
-from agent.planning.mock_planner import MockPlanner
-from agent.planning.replanner import Replanner, FeedbackReplanner
-from agent.state.manager import StateManager
-from agent.tools import REGISTRY  # noqa: F401  (registers every tool)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,42 +84,13 @@ def main(argv: list[str] | None = None) -> int:
         task_contracts=load_contracts(args.task_contracts) if args.task_contracts else [],
     )
 
-    if args.resume:
-        from agent.core.config import AgentConfig
-        from agent.state.store import RunStore
-        from agent.state.journal import load
-        try:
-            run_db = Path(args.resume) / "state.db"
-            if not run_db.is_file():
-                raise ValueError("run state database not found")
-            store = RunStore(run_db)
-            try:
-                config = AgentConfig(**load(store)["config"])
-            finally:
-                store.close()
-            if config.mode == "llm":
-                from agent.llm.client import LLMClient
-                if not LLMClient().is_live:
-                    raise ValueError("saved LLM run requires live model credentials to resume")
-        except (ValueError, OSError, LLMError) as exc:
-            print(f"[error] {exc}", file=sys.stderr)
-            return 2
-
-    planner = MockPlanner() if config.mode == "mock" else LLMPlanner()
-
-    orchestrator = Orchestrator(
-        planner=planner,
-        replanner=Replanner() if config.mode == "mock" else FeedbackReplanner(planner.client),
-        registry=REGISTRY,
-        state_factory=StateManager.new_run,
-        config=config,
-    )
-
     try:
         from agent.core.task_spec import TaskSpec
 
-        summary = (orchestrator.resume(args.resume) if args.resume else
-                   orchestrator.run(TaskSpec.load(args.task_spec) if args.task_spec else args.goal))
+        from agent.service import execute_run
+
+        goal = TaskSpec.load(args.task_spec) if args.task_spec else args.goal
+        summary = execute_run(config, goal, resume=args.resume)
     except (ValueError, OSError, LLMError) as exc:
         print(f"[error] {exc}", file=sys.stderr)
         if getattr(exc, "run_dir", None):

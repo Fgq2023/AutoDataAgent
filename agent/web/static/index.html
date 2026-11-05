@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AutoDataAgent · 数据任务工作台</title><link rel="stylesheet" href="/static/style.css">
+<script defer src="/static/app.js"></script></head>
+<body>
+<header><div class="brand">A<span>AutoDataAgent</span></div><span class="local">本地工作空间 · M4</span></header>
+<main>
+<section class="intro"><p class="eyebrow">ANALYTICAL WORKSPACE</p><h1>从分析目标到可核对的结果</h1><p>选择数据，确认口径，跟踪每一步执行与验证。</p></section>
+<div id="message" role="status" aria-live="polite"></div>
+<div class="workspace">
+<aside class="card">
+<h2>创建分析任务</h2>
+<form id="start-form">
+<label for="goal">分析目标</label><textarea id="goal" required rows="4" placeholder="例如，分析 sales.csv 的月度销售趋势，输出月度汇总表和趋势图"></textarea>
+<div class="section-label">工作区数据 <button id="refresh-sources" type="button" class="text-button">刷新</button></div>
+<p id="data-root" class="muted small"></p><div id="sources" class="source-list"></div>
+<div class="two-columns"><div><label for="mode">规划模式</label><select id="mode"><option value="mock">Mock · 固定演示计划</option><option value="llm">真实模型</option></select></div>
+<div><label for="backend">Python 执行</label><select id="backend"><option value="docker">Docker 隔离</option><option value="subprocess">本地受信任子进程</option></select></div></div>
+<p id="model-info" class="muted small"></p>
+<details><summary>任务规格与演示设置</summary>
+<p class="muted small">可粘贴 TaskSpec JSON。目标和选择的数据源以表单为准。questions 中的问题会在执行前要求回答。</p>
+<label for="spec">补充 TaskSpec</label><textarea id="spec" rows="5" spellcheck="false" placeholder='{"questions":{"refunds":"退货是否计入净销售额？"}}'></textarea>
+<label for="injection">固定演示故障</label><select id="injection"><option value="">正常运行</option><option value="s3">瞬时工具错误</option><option value="s3:permanent">原聚合工具持续失败，切换实现</option><option value="s4:permanent">图表步骤无法恢复</option></select>
+</details>
+<button id="start" type="submit" class="primary full">开始分析</button></form>
+<hr><h2>历史任务 <button id="refresh-history" class="text-button" type="button">刷新</button></h2>
+<div id="history" class="history"></div>
+</aside>
+<div class="results">
+<section class="card"><div class="heading-row"><div><p class="eyebrow">TASK EXECUTION</p><h2 id="run-title">等待创建任务</h2></div><span id="run-status" class="badge">就绪</span></div>
+<p id="run-goal" class="muted">执行过程、校验结果和分析产物将在这里显示。</p>
+<div class="actions"><button id="cancel" disabled>取消任务</button><button id="resume" disabled>从检查点恢复</button><a id="export" class="button disabled">下载运行证据 ZIP</a></div>
+<div id="budget" class="muted small"></div>
+<div id="clarification" class="clarification" hidden><h3>请确认分析口径</h3><form id="clarify-form"><div id="questions"></div><button type="submit" class="primary">确认并继续</button></form></div>
+<div class="table-wrap"><table><thead><tr><th>步骤 / 工具</th><th>依赖</th><th>状态</th><th>尝试</th></tr></thead><tbody id="steps"><tr><td colspan="4" class="empty">尚无执行计划</td></tr></tbody></table></div>
+</section>
+<section class="card"><h2>分析产物</h2><div id="artifacts" class="artifact-list"><p class="muted">完成验证的表格、图表和报告会显示在这里。</p></div>
+<div id="preview" class="preview" aria-live="polite"></div></section>
+<section class="card"><div class="heading-row"><h2>验证与恢复记录</h2><span class="muted small">按执行顺序展示</span></div><div id="events" class="events"><p class="muted">尚无运行记录</p></div></section>
+</div></div>
+<footer>单用户本地原型 · 凭据通过服务端环境配置 · 取消在执行边界生效</footer>
+</main></body></html>

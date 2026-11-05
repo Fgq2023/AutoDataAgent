@@ -57,7 +57,7 @@ def clean_reference(source):
     return result
 
 
-def check_answers(name, summary, data):
+def check_answers(name, summary, data, *, expected_recovered=None):
     run = Path(summary.run_dir)
     trace = json.loads(Path(summary.trace_path).read_text(encoding="utf-8"))
     require((run / "state.db").is_file(), "missing state database")
@@ -76,7 +76,9 @@ def check_answers(name, summary, data):
     require(summary.status == "finished", "run did not finish")
     require(summary.n_failed == 0 and summary.n_skipped == 0, "failed or skipped steps")
     require(summary.report_path and Path(summary.report_path).stat().st_size > 0, "missing report")
-    require(summary.n_recovered == int(name in ("retry", "replan")), "wrong recovery count")
+    if expected_recovered is None:
+        expected_recovered = int(name in ("retry", "replan"))
+    require(summary.n_recovered == expected_recovered, "wrong recovery count")
     if name == "sql":
         # Different query structure: no JOIN, then combine by customer id.
         with sqlite3.connect(data / "orders.db") as conn:
