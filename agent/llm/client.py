@@ -38,12 +38,19 @@ class LLMClient:
         # Stable for this client/conversation, as required by OpenCode Go.
         self.session_id = uuid.uuid4().hex
         self.last_call = None
+        self.request_count = 0
+        self.before_request = None
 
     # ------------------------------------------------------------------ #
     @property
     def is_live(self) -> bool:
         """True when a real provider is configured."""
         return self.provider == "openai" and bool(self.api_key)
+
+    def reserve_request(self):
+        timeout = self.before_request() if self.before_request else None
+        self.request_count += 1
+        return timeout
 
     def complete(self, system: str, user: str, max_tokens: int = 4000,
                  temperature: float = 0.0) -> str:
@@ -79,15 +86,22 @@ class LLMClient:
         )
         started = time.perf_counter()
         self.last_call = None
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
-                body = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            detail = detail.replace(self.api_key, "[REDACTED]")[:500]
-            raise LLMError(f"LLM HTTP {exc.code}: {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise LLMError(f"LLM unreachable: {exc.reason}") from exc
+        for attempt in range(2):
+            request_timeout = self.reserve_request() or 60
+            attempt_started = time.perf_counter()
+            try:
+                with urllib.request.urlopen(req, timeout=min(60, request_timeout)) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                detail = detail.replace(self.api_key, "[REDACTED]")[:500]
+                raise LLMError(f"LLM HTTP {exc.code}: {detail}") from exc
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+                if attempt == 0:
+                    time.sleep(min(1, max(0, request_timeout - (time.perf_counter() - attempt_started))))
+                    continue
+                raise LLMError(f"LLM unreachable: {exc}") from exc
 
         try:
             self.last_call = {"model": body.get("model", self.model),

@@ -281,3 +281,11 @@ MIT — see [LICENSE](LICENSE).
 ```
 
 `sources` 是相对于数据根目录的文件路径。 `output_columns` 按产物名称声明实际输出列及其顺序。当前确认流程使用调用方显式列出的关键问题。
+
+### M3 恢复与隔离执行
+
+新运行支持用 --resume 指向运行目录，恢复会校验输入、计划清单和已验证产物，继续累计预算。LLM 模式恢复需要模型凭据，端点、模型名和会话沿用保存的运行。
+
+Docker 后端先构建 docker/Dockerfile.sandbox 为 autodataagent-sandbox:local，再通过 --sandbox-backend docker 选择。scripts/verify_m3.py 可显式执行真实 Docker 验收。独立任务评测默认要求 Docker。
+
+详细复现命令、实测证据与适用范围见 docs/m3-status-2026-11-05.md。

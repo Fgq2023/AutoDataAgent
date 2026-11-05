@@ -42,7 +42,8 @@ class PythonExecTool(Tool):
         rel = f"artifacts/{name}.csv"
         output_csv = run_dir / rel
 
-        run_isolated(code, input_csv, output_csv, timeout_s=float(ctx.timeout_s))
+        run_isolated(code, input_csv, output_csv, timeout_s=float(ctx.timeout_s),
+                     backend=ctx.sandbox_backend, image=ctx.sandbox_image)
 
         df = pd.read_csv(output_csv)
         return [

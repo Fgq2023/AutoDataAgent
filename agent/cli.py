@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Autonomous data agent: decompose a goal, execute tools, "
         "verify results, recover from failures, produce a report.",
     )
+    parser.add_argument("--resume", help="existing run directory")
+    parser.add_argument("--sandbox-backend", choices=["subprocess", "docker"], default="subprocess")
     parser.add_argument("--task-spec", help="JSON specification with confirmed answers")
     parser.add_argument("goal", nargs="?", help="the analytical goal in natural language")
     parser.add_argument(
@@ -66,8 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if bool(args.goal) == bool(args.task_spec):
-        parser.error("provide either a goal or --task-spec")
+    if sum(map(bool, (args.goal, args.task_spec, args.resume))) != 1:
+        parser.error("provide a goal, --task-spec, or --resume")
 
     # pipes / CI logs: emit UTF-8 so Chinese goals survive any codepage
     for stream in (sys.stdout, sys.stderr):
@@ -77,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     from agent.verification.task import load_contracts
     config = load_config(
         mode=args.mode,
+        sandbox_backend=args.sandbox_backend,
         data_root=args.data_root,
         outputs_root=args.outputs_root,
         inject_failure=args.inject_failure,
@@ -85,6 +88,27 @@ def main(argv: list[str] | None = None) -> int:
         max_replans=args.max_replans,
         task_contracts=load_contracts(args.task_contracts) if args.task_contracts else [],
     )
+
+    if args.resume:
+        from agent.core.config import AgentConfig
+        from agent.state.store import RunStore
+        from agent.state.journal import load
+        try:
+            run_db = Path(args.resume) / "state.db"
+            if not run_db.is_file():
+                raise ValueError("run state database not found")
+            store = RunStore(run_db)
+            try:
+                config = AgentConfig(**load(store)["config"])
+            finally:
+                store.close()
+            if config.mode == "llm":
+                from agent.llm.client import LLMClient
+                if not LLMClient().is_live:
+                    raise ValueError("saved LLM run requires live model credentials to resume")
+        except (ValueError, OSError) as exc:
+            print(f"[error] {exc}", file=sys.stderr)
+            return 2
 
     planner = MockPlanner() if config.mode == "mock" else LLMPlanner()
 
@@ -99,7 +123,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from agent.core.task_spec import TaskSpec
 
-        summary = orchestrator.run(TaskSpec.load(args.task_spec) if args.task_spec else args.goal)
+        summary = (orchestrator.resume(args.resume) if args.resume else
+                   orchestrator.run(TaskSpec.load(args.task_spec) if args.task_spec else args.goal))
     except (ValueError, OSError) as exc:
         print(f"[error] {exc}", file=sys.stderr)
         return 2

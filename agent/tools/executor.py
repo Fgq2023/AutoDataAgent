@@ -118,7 +118,9 @@ class Executor:
                 lookup=self.state.lookup,
                 step_summaries=self.state.step_summaries,
                 provenance_lines=self.state.provenance_lines,
-                timeout_s=self.config.exec_timeout_s,
+                timeout_s=min(self.config.exec_timeout_s, getattr(self, "remaining_s", self.config.exec_timeout_s)),
+                sandbox_backend=self.config.sandbox_backend,
+                sandbox_image=self.config.sandbox_image,
                 rule_citations=self.rule_citations,
                 verification_events=[
                     event["payload"] for event in self.state.store.all_trace()
