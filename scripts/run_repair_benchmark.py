@@ -132,25 +132,35 @@ def main():
             meter = Meter(client, folder)
             policy = Replanner() if group == "tool_substitution" else FeedbackReplanner(meter)
             config = AgentConfig(data_root=str(data), outputs_root=str(folder))
-            summary = Orchestrator(FaultPlanner(fault), policy, REGISTRY, StateManager.new_run, config).run(
-                "分析 sales.csv 月度趋势，清洗后按 date 的月份汇总 units 和 revenue，绘制 revenue 月度趋势图并生成报告")
+            summary = None
+            rejected_before_execution = False
             correct, error = True, None
             try:
-                check_answer(summary, data)
-            except (ValueError, KeyError, OSError) as exc:
+                summary = Orchestrator(FaultPlanner(fault), policy, REGISTRY, StateManager.new_run, config).run(
+                    "分析 sales.csv 月度趋势，清洗后按 date 的月份汇总 units 和 revenue，绘制 revenue 月度趋势图并生成报告")
+            except ValueError as exc:
+                if case != "missing_source" or "source outside" not in str(exc):
+                    raise
+                rejected_before_execution = True
                 correct, error = False, str(exc)
-            events = json.loads(Path(summary.trace_path).read_text(encoding="utf-8"))
+            if summary is not None:
+                try:
+                    check_answer(summary, data)
+                except (ValueError, KeyError, OSError) as exc:
+                    correct, error = False, str(exc)
+            events = json.loads(Path(summary.trace_path).read_text(encoding="utf-8")) if summary else []
             counts = Counter(e["payload"]["step_id"] for e in events if e["event"] == "step_attempt")
             upstream = [s for s in counts if fault and int(s[1:]) < int(fault[0][1:])]
-            rejected_ok = case == "missing_source" and summary.n_failed == 1 and not meter.calls
+            rejected_ok = case == "missing_source" and (rejected_before_execution or summary.n_failed == 1) and not meter.calls
             item = {"case": case, "group": group, "answer_correct": correct,
                     "expected_behavior": rejected_ok if case == "missing_source" else correct,
-                    "wrong_accept": summary.status == "finished" and not correct,
+                    "wrong_accept": bool(summary and summary.status == "finished" and not correct),
+                    "rejected_before_execution": rejected_before_execution,
                     "error": error, "calls": len(meter.calls),
                     "model_ms": sum(c["wall_ms"] for c in meter.calls),
                     "usage": [c.get("metadata") for c in meter.calls],
                     "upstream_reexecutions": sum(counts[s] - 1 for s in upstream),
-                    "summary": summary.to_dict()}
+                    "summary": summary.to_dict() if summary else None}
             results.append(item)
             (root / "results.json").write_text(json.dumps({"live": options.live, "model": client.model, "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
             print(case, group, "correct=" + str(correct), "calls=" + str(item["calls"]), flush=True)
