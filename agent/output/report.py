@@ -116,7 +116,8 @@ class ReportTool(Tool):
         lines += ["## 结果", ""]
         for art in arts:
             if art.kind in ("dataframe", "table"):
-                df = pd.read_csv(run_dir / art.path)
+                from agent.tools.builtins._io import read_df
+                df = read_df(run_dir, art)
                 lines += [f"### {art.name}", "",
                           f"共 {len(df)} 行（最多展示 20 行），完整数据: `{art.path}`", ""]
                 show = df.head(20)
@@ -156,7 +157,8 @@ class ReportTool(Tool):
             )
             lines.append("")
 
-        out = run_dir / "report.md"
+        out = (run_dir / "report.md").resolve()
+        out.relative_to(run_dir.resolve())
         out.write_text("\n".join(lines), encoding="utf-8")
 
         return [

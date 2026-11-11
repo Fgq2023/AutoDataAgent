@@ -1,11 +1,13 @@
 """``python_exec`` — run a generated pandas snippet inside the sandbox."""
 
 from __future__ import annotations
+from agent.tools.builtins._io import output_path
 
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import json
 
 from agent.core.types import RunContext
 from agent.tools.base import ArtifactSpec, Tool, register
@@ -40,12 +42,14 @@ class PythonExecTool(Tool):
         run_dir = Path(ctx.run_dir)
         input_csv = run_dir / art.path
         rel = f"artifacts/{name}.csv"
-        output_csv = run_dir / rel
+        output_csv = output_path(ctx.run_dir, name, ".csv")
 
         run_isolated(code, input_csv, output_csv, timeout_s=float(ctx.timeout_s),
-                     backend=ctx.sandbox_backend, image=ctx.sandbox_image)
+                     backend=ctx.sandbox_backend, image=ctx.sandbox_image, input_meta=art.meta)
 
-        df = pd.read_csv(output_csv)
+        from agent.tools.builtins._io import read_table
+        schema = json.loads(Path(str(output_csv) + ".schema.json").read_text(encoding="utf-8"))
+        df = read_table(output_csv, schema)
         return [
             ArtifactSpec(
                 name=name,

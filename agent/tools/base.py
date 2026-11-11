@@ -57,6 +57,9 @@ class Tool(ABC):
         for key, expected in self.required_args.items():
             if key not in args:
                 raise ValueError(f"{self.name}: missing argument {key!r}")
+        if "name" in args:
+            from agent.tools.builtins._io import output_path
+            output_path(".", args["name"], ".csv")
         for key, expected in (self.required_args | self.optional_args).items():
             if key in args and (not isinstance(args[key], expected)
                                 or expected is str and not args[key].strip()

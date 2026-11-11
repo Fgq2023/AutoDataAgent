@@ -1,6 +1,7 @@
 """``load_data`` — load a CSV/Excel/JSON source into a dataframe artifact."""
 
 from __future__ import annotations
+from agent.tools.builtins._io import output_path
 
 import json
 from pathlib import Path
@@ -46,7 +47,7 @@ class LoadDataTool(Tool):
         else:
             raise ValueError(f"unsupported tabular source format: {suffix}")
         rel = f"artifacts/{name}.csv"
-        out = Path(ctx.run_dir) / rel
+        out = output_path(ctx.run_dir, name, ".csv")
         out.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(out, index=False)
 

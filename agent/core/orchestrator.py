@@ -103,6 +103,15 @@ class Orchestrator:
             if any(Path(source).is_absolute() for source in spec.sources) or not requested <= available:
                 raise ValueError("TaskSpec sources must identify profiled files relative to data-root")
             ctx.profiles = [profile for profile in ctx.profiles if Path(profile.path) in requested]
+        root = Path(self.config.data_root).resolve()
+        ctx.profiles = [profile for profile in ctx.profiles if Path(profile.path).is_relative_to(root)]
+        allowed_sources = {Path(profile.path).resolve() for profile in ctx.profiles}
+        failed_profiles = [profile for profile in ctx.profiles if not profile.schema and profile.kind != "text"]
+        if failed_profiles and spec.sources:
+            raise ValueError("selected sources failed profiling: " + ", ".join(profile.name for profile in failed_profiles))
+        if not spec.sources:
+            ctx.profiles = [profile for profile in ctx.profiles if profile.schema or profile.kind == "text"]
+            allowed_sources = {Path(profile.path).resolve() for profile in ctx.profiles}
         citations = spec.rule_citations(self.config.data_root)
         ctx.task_spec = {**spec.to_dict(), "rule_citations": citations}
         ctx.task_contracts = self.config.task_contracts
@@ -143,9 +152,9 @@ class Orchestrator:
 
             validate_plan_contracts(graph, self.config.task_contracts)
             for step in graph.steps:
-                if spec.sources and "source" in self.registry[step.tool].input_contract:
+                if "source" in self.registry[step.tool].input_contract:
                     source = step.args.get("source")
-                    if not isinstance(source, str) or Path(source).resolve() not in requested:
+                    if not isinstance(source, str) or Path(source).resolve() not in allowed_sources:
                         raise ValueError(f"step {step.step_id}: source outside TaskSpec")
             for artifact, columns in spec.output_columns.items():
                 producers = [step for step in graph.steps if step.output_name == artifact]

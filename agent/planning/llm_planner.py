@@ -117,6 +117,8 @@ class LLMPlanner(BasePlanner):
                 outputs[step.output_name] = step.step_id
         # pass 2: tools, deps, and artifact references
         for s in graph.steps:
+            if not set(s.verify) <= {"schema", "semantic"}:
+                raise ValueError("unknown verification flag")
             if s.tool not in REGISTRY:
                 raise ValueError(f"step {s.step_id}: unknown tool {s.tool!r}")
             for dep in s.depends_on:

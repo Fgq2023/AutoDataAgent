@@ -95,3 +95,7 @@ M5 重点实现局部步骤插入与替换、受影响产物失效处理及报�
 依赖中的 Starlette 对 httpx 测试客户端发出弃用提醒，当前 HTTP 测试和实际浏览器行为通过。Web 包静态 HTML/CSS/JavaScript 已通过 wheel 内容检查。
 
 最终完整回归为 144 项通过。FastAPI 服务生命周期和 HTTP 测试分别参考官方说明 https://fastapi.tiangolo.com/advanced/events/ 与 https://fastapi.tiangolo.com/tutorial/testing/ 。
+
+## 可分发原始证据
+
+本报告引用的两份真实模型结果与两轮演练记录、六份运行 ZIP 已归档到 [候选证据包](evidence/m4-candidate.zip)。克隆仓库即可取得这些原始记录，包内 MANIFEST.json 提供逐文件 SHA-256。演练产物、来源路径与验证轨迹保留在运行 ZIP 中；此归档不包含 API 凭据。重新生成需要本机原始 outputs，命令为 python scripts/package_m4_evidence.py。

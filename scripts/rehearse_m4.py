@@ -47,6 +47,7 @@ def request(client, method, path, payload=None):
 
 
 def main():
+    (ROOT / "outputs").mkdir(parents=True, exist_ok=True)
     output = Path(tempfile.mkdtemp(prefix="m4_rehearsal_", dir=ROOT / "outputs"))
     results = []
     for round_number in (1, 2):
