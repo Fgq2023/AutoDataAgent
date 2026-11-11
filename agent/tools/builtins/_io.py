@@ -36,8 +36,8 @@ def read_table(path, meta):
 
 
 def output_path(run_dir, name, suffix):
-    if not isinstance(name, str) or not re.fullmatch(r"[\w-]+", name):
-        raise ValueError("artifact name must contain only letters, digits, underscores or hyphens")
+    if not isinstance(name, str) or (not re.fullmatch(r"[\w .-]+", name) or name in (".", "..")):
+        raise ValueError("artifact name must be a safe single filename component")
     root = Path(run_dir).resolve()
     path = (root / "artifacts" / (name + suffix)).resolve()
     path.relative_to(root)
