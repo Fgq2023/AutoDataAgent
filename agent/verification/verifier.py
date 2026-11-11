@@ -39,21 +39,24 @@ class Verifier:
             )
 
         checks: list[CheckResult] = []
+        if not set(step.verify) <= {"schema", "semantic"}:
+            return Verdict(False, [CheckResult("verification:flags", False, "unknown verification flag")])
+        if not result.outputs:
+            return Verdict(False, [CheckResult("schema:outputs", False, "tool produced no outputs")])
 
         # ---- layer 1: schema -------------------------------------------------
         if step.output_columns and not result.outputs:
             checks.append(CheckResult(f"schema:{step.step_id}", False, "expected a table output"))
-        if "schema" in step.verify or step.output_columns:
-            expected_kind = tool.output_contract.get("kind")
-            for aid in result.outputs:
-                try:
-                    art = state.artifact(aid)
-                except KeyError as exc:
-                    checks.append(
-                        CheckResult(f"schema:{aid}", False, str(exc))
-                    )
-                    continue
-                checks.append(check_artifact(art, state.run_dir, expected_kind, step.output_columns))
+        expected_kind = tool.output_contract.get("kind")
+        for aid in result.outputs:
+            try:
+                art = state.artifact(aid)
+            except KeyError as exc:
+                checks.append(
+                    CheckResult(f"schema:{aid}", False, str(exc))
+                )
+                continue
+            checks.append(check_artifact(art, state.run_dir, expected_kind, step.output_columns))
 
         if any(not c.passed for c in checks):
             return Verdict(False, checks)

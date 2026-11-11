@@ -105,7 +105,7 @@ def profile_data_sources(data_root: str | Path) -> DataContext:
         return DataContext(root=str(root.resolve() if root.exists() else root), profiles=[])
 
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.name.startswith("."):
+        if not path.is_file() or path.name.startswith(".") or not path.resolve().is_relative_to(root.resolve()):
             continue
         kind = _SUPPORTED.get(path.suffix.lower())
         if kind is None:
@@ -124,9 +124,17 @@ def profile_data_sources(data_root: str | Path) -> DataContext:
                     )
                 )
         elif kind == "sqlite":
-            profiles.append(_profile_sqlite(path))
+            try:
+                profiles.append(_profile_sqlite(path))
+            except Exception as exc:
+                profiles.append(DataProfile(path.stem, str(path.resolve()), kind, {},
+                                            [f"failed to profile: {exc}"]))
         elif kind == "json":
-            profiles.append(_profile_json(path))
+            try:
+                profiles.append(_profile_json(path))
+            except Exception as exc:
+                profiles.append(DataProfile(path.stem, str(path.resolve()), kind, {},
+                                            [f"failed to profile: {exc}"]))
         elif kind == "text":
             profiles.append(DataProfile(path.stem, str(path.resolve()), "text", {}))
     return DataContext(root=str(root.resolve()), profiles=profiles)

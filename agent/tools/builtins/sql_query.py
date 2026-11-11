@@ -1,6 +1,7 @@
 """``sql_query`` — read-only SELECT execution against a SQLite database."""
 
 from __future__ import annotations
+from agent.tools.builtins._io import output_path
 
 import re
 import sqlite3
@@ -65,7 +66,7 @@ class SqlQueryTool(Tool):
             conn.close()
 
         rel = f"artifacts/{name}.csv"
-        out = Path(ctx.run_dir) / rel
+        out = output_path(ctx.run_dir, name, ".csv")
         out.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(out, index=False)
 

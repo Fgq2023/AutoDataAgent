@@ -1,6 +1,7 @@
 """``chart`` — render a line chart of a dataframe artifact with matplotlib."""
 
 from __future__ import annotations
+from agent.tools.builtins._io import output_path
 
 from pathlib import Path
 from typing import Any
@@ -61,7 +62,7 @@ class ChartTool(Tool):
         fig.tight_layout()
 
         rel = f"artifacts/{name}.png"
-        out = Path(ctx.run_dir) / rel
+        out = output_path(ctx.run_dir, name, ".png")
         out.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(out)
         plt.close(fig)

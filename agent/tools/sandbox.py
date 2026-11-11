@@ -15,6 +15,7 @@ from __future__ import annotations
 import subprocess
 import uuid
 import shutil
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -24,13 +25,23 @@ _CHILD_TEMPLATE = dedent(
     """
     import sys
     import traceback
+    import json
 
     import pandas as pd
 
     try:
-        df = pd.read_csv(sys.argv[1])
+        meta = json.loads(sys.argv[4]) if len(sys.argv) > 4 else {}
+        df = pd.read_csv(sys.argv[1], converters={c: str for c in meta.get("string_columns", [])})
+        for column, rows in meta.get("null_cells", {}).items():
+            for row in rows:
+                df.at[row, column] = None
         exec(compile(sys.argv[3], "<agent-code>", "exec"), globals())
         result.to_csv(sys.argv[2], index=False)
+        strings = [str(c) for c in result.columns if str(result[c].dtype) in ("object", "str", "string")]
+        metadata = {"string_columns": strings, "null_cells": {
+            c: [i for i, missing in enumerate(result[c].isna()) if missing] for c in strings}}
+        with open(sys.argv[2] + ".schema.json", "w", encoding="utf-8") as stream:
+            json.dump(metadata, stream)
         print("sandbox: ok")
     except Exception:
         traceback.print_exc()
@@ -45,14 +56,14 @@ class SandboxTimeout(Exception):
 
 def run_isolated(code: str, input_csv: str | Path, output_csv: str | Path,
                  timeout_s: float, *, backend="subprocess",
-                 image="autodataagent-sandbox:local") -> str:
+                 image="autodataagent-sandbox:local", input_meta=None) -> str:
     """Run *code* in a child interpreter; return its captured stdout.
 
     Raises :class:`SandboxTimeout` on timeout, :class:`RuntimeError` with
     the child's stderr on non-zero exit.
     """
     if backend == "docker":
-        return run_docker(code, input_csv, output_csv, timeout_s, image)
+        return run_docker(code, input_csv, output_csv, timeout_s, image, input_meta)
     if backend != "subprocess":
         raise ValueError("unsupported sandbox backend")
     script = Path(tempfile.mkdtemp(prefix="ada_sandbox_")) / "_sandbox.py"
@@ -64,6 +75,7 @@ def run_isolated(code: str, input_csv: str | Path, output_csv: str | Path,
         str(input_csv),
         str(output_csv),
         code,
+        json.dumps(input_meta or {}),
     ]
     try:
         proc = subprocess.run(
@@ -88,7 +100,7 @@ def run_isolated(code: str, input_csv: str | Path, output_csv: str | Path,
 
 
 
-def run_docker(code, input_csv, output_csv, timeout_s, image):
+def run_docker(code, input_csv, output_csv, timeout_s, image, input_meta=None):
     """Mount only this input and a fresh output directory, without credentials."""
     name = "ada-" + uuid.uuid4().hex
     with tempfile.TemporaryDirectory(prefix="ada_container_") as directory:
@@ -108,7 +120,7 @@ def run_docker(code, input_csv, output_csv, timeout_s, image):
             "--mount", f"type=bind,source={outputs.resolve()},target=/output",
             image, "timeout", "--kill-after=1s", f"{max(0.1, timeout_s - 1)}s",
             "python", "-B", "/input/main.py", "/input/data.csv",
-            "/output/result.csv", code,
+            "/output/result.csv", code, json.dumps(input_meta or {}),
         ]
         try:
             proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s)
@@ -127,4 +139,8 @@ def run_docker(code, input_csv, output_csv, timeout_s, image):
             raise RuntimeError("container produced no regular result.csv")
         Path(output_csv).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(result, output_csv)
+        schema = outputs / "result.csv.schema.json"
+        if not schema.is_file() or schema.is_symlink():
+            raise RuntimeError("container output schema is missing")
+        shutil.copyfile(schema, str(output_csv) + ".schema.json")
         return proc.stdout

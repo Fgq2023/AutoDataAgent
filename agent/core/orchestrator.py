@@ -103,6 +103,15 @@ class Orchestrator:
             if any(Path(source).is_absolute() for source in spec.sources) or not requested <= available:
                 raise ValueError("TaskSpec sources must identify profiled files relative to data-root")
             ctx.profiles = [profile for profile in ctx.profiles if Path(profile.path) in requested]
+        root = Path(self.config.data_root).resolve()
+        ctx.profiles = [profile for profile in ctx.profiles if Path(profile.path).is_relative_to(root)]
+        allowed_sources = {Path(profile.path).resolve() for profile in ctx.profiles}
+        failed_profiles = [profile for profile in ctx.profiles if not profile.schema and profile.kind != "text"]
+        if failed_profiles and spec.sources:
+            raise ValueError("selected sources failed profiling: " + ", ".join(profile.name for profile in failed_profiles))
+        if not spec.sources:
+            ctx.profiles = [profile for profile in ctx.profiles if profile.schema or profile.kind == "text"]
+            allowed_sources = {Path(profile.path).resolve() for profile in ctx.profiles}
         citations = spec.rule_citations(self.config.data_root)
         ctx.task_spec = {**spec.to_dict(), "rule_citations": citations}
         ctx.task_contracts = self.config.task_contracts
@@ -123,6 +132,8 @@ class Orchestrator:
         planning_events = getattr(client, "on_event", None)
 
         def reserve_planning_request():
+            if cancelled is not None and cancelled():
+                raise ValueError("planning cancelled")
             remaining = self.config.run_timeout_s - (time.perf_counter() - t0)
             if remaining <= 0 or manifest["model_requests"] >= 8:
                 raise ValueError("planning budget exhausted")
@@ -141,9 +152,9 @@ class Orchestrator:
 
             validate_plan_contracts(graph, self.config.task_contracts)
             for step in graph.steps:
-                if spec.sources and "source" in self.registry[step.tool].input_contract:
+                if "source" in self.registry[step.tool].input_contract:
                     source = step.args.get("source")
-                    if not isinstance(source, str) or Path(source).resolve() not in requested:
+                    if not isinstance(source, str) or Path(source).resolve() not in allowed_sources:
                         raise ValueError(f"step {step.step_id}: source outside TaskSpec")
             for artifact, columns in spec.output_columns.items():
                 producers = [step for step in graph.steps if step.output_name == artifact]
@@ -170,7 +181,7 @@ class Orchestrator:
                 journal.save(state, manifest)
                 exc.run_dir = str(state.run_dir)
                 state.trace("run_stopped", {"phase": "planning",
-                            "reason": getattr(exc, "reason", "planning_error")})
+                            "reason": "cancelled" if cancelled is not None and cancelled() else getattr(exc, "reason", "planning_error")})
                 state.export_trace()
                 state.close()
             raise
@@ -232,6 +243,8 @@ class Orchestrator:
         old_events = {c: getattr(c, "on_event", None) for c in clients}
 
         def before_request():
+            if cancelled is not None and cancelled():
+                raise ValueError("run cancelled")
             if elapsed_before + time.perf_counter() - t0 >= self.config.run_timeout_s:
                 raise ValueError("run time budget exhausted")
             if manifest["model_requests"] >= 8:

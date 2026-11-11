@@ -29,7 +29,7 @@ python scripts/make_demo_data.py
 ### Scenario 1 — trend analysis (the headline demo)
 
 ```bash
-python -m agent "分析 data/sales.csv 的月度销售趋势，输出月度汇总表和趋势图"
+python -m agent --mode mock "分析 data/sales.csv 的月度销售趋势，输出月度汇总表和趋势图"
 ```
 
 ```
@@ -54,11 +54,11 @@ Every run produces, inside `outputs/run_<id>/`:
 
 ```bash
 # transient failure at s3 -> classified timeout -> RETRY rescues
-python -m agent "分析 data/sales.csv 的月度销售趋势" --inject-failure s3
+python -m agent --mode mock "分析 data/sales.csv 的月度销售趋势" --inject-failure s3
 
 # permanent failure at s3 -> RETRY exhausted -> REPLAN swaps
 # aggregate -> aggregate_pivot (identical contract) -> run still finishes
-python -m agent "分析 data/sales.csv 的月度销售趋势" --inject-failure s3:permanent
+python -m agent --mode mock "分析 data/sales.csv 的月度销售趋势" --inject-failure s3:permanent
 ```
 
 In the second demo the trace shows the full recovery arc:
@@ -90,13 +90,13 @@ planning error:
 
 ```bash
 cp .env.example .env   # set OPENAI_API_KEY (any OpenAI-compatible endpoint)
-python -m agent "分析 data/sales.csv 的月度销售趋势" --mode llm
+python -m agent "分析 data/sales.csv 的月度销售趋势" --mode llm --sandbox-backend docker
 ```
 
 ### Tests
 
 ```bash
-pytest          # 41 tests: planning / state / tools / e2e — all offline
+pytest          # tests (see the current acceptance records): planning / state / tools / e2e — all offline
 ```
 
 ### Reproduce the offline scenario baseline
@@ -215,7 +215,7 @@ are cross-team changes (see `.github/CODEOWNERS`).
 ### Data flow of a step
 
 1. **plan** (A) emits `Step{tool, args, depends_on, verify}`
-2. **execute** (C) resolves artifact references, runs the tool in isolation,
+2. **execute** (C) resolves artifact references and executes controlled host tools, using the selected isolation backend for generated Python,
    registers artifacts + provenance with **state** (B)
 3. **verify** (C) checks the *schema* layer, then the tool's declared
    *semantic* rules against input + output
@@ -250,7 +250,7 @@ agent/
   llm/           OpenAI-compatible client (stdlib only) + offline mock
 data/            demo datasets (regenerate with scripts/make_demo_data.py)
 examples/        runnable demos for the three syllabus scenarios
-tests/           41 offline tests incl. e2e failure-injection scenarios
+tests/           offline regression and HTTP acceptance tests
 docs/            architecture + API contracts (the team's "constitution")
 .github/         CODEOWNERS (subtopic ownership) + CI (pytest, offline)
 ```
@@ -277,7 +277,7 @@ MIT — see [LICENSE](LICENSE).
 `task.json` 中的 `questions` 与 `answers` 使用相同的键。未填写答案时，CLI 会列出待确认问题并退出。填写答案后，可用配置了模型的 CLI 执行同一份规格。
 
 ```powershell
-.\.venv\Scripts\python.exe -m agent --mode llm --task-spec outputs/cross-source-demo/task.json --data-root outputs/cross-source-demo
+.\.venv\Scripts\python.exe -m agent --mode llm --sandbox-backend docker --task-spec outputs/cross-source-demo/task.json --data-root outputs/cross-source-demo
 ```
 
 `sources` 是相对于数据根目录的文件路径。 `output_columns` 按产物名称声明实际输出列及其顺序。当前确认流程使用调用方显式列出的关键问题。
@@ -289,3 +289,22 @@ MIT — see [LICENSE](LICENSE).
 Docker 后端先构建 docker/Dockerfile.sandbox 为 autodataagent-sandbox:local，再通过 --sandbox-backend docker 选择。scripts/verify_m3.py 可显式执行真实 Docker 验收。独立任务评测默认要求 Docker。
 
 详细复现命令、实测证据与适用范围见 docs/m3-status-2026-11-05.md。
+
+
+### 本地 Web 工作台（M4）
+
+安装可选依赖后运行：
+
+    python -m pip install -e ".[web]"
+    python -m agent.web --data-root data --outputs-root outputs/web --port 8000
+
+打开 http://127.0.0.1:8000 。页面支持目标与数据选择、关键口径确认、启动/取消/恢复、步骤和验证轨迹、表格/图表/报告预览，以及完整证据 ZIP 导出。CLI 与 Web 共用 execute_run 构造与执行入口。
+
+运行 python scripts/rehearse_m4.py 可完成两轮正常、错误恢复和真实服务进程中断恢复演练。详细使用说明见 docs/m4-local-web.md，期中候选技术报告见 docs/midterm-report-2026-11-05.md。
+
+
+### Execution boundaries
+
+Offline examples should select --mode mock explicitly. For live planning use --mode llm --sandbox-backend docker after configuring provider environment variables. The ordinary CLI defaults to the trusted local subprocess backend, while the Web and independent formal evaluation select Docker.
+
+Docker isolates generated Python only. File loading, read-only SQL, cleaning, joins, plotting and reporting execute as controlled host tools. Artifact names and resolved output paths are checked before writing, and source reads are restricted to the profiled data-root allowlist (further narrowed by TaskSpec selection).
